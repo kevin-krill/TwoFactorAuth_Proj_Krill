@@ -35,6 +35,11 @@
 *.i*86
 *.x86_64
 *.hex
+pke_server
+tfa_server
+tfa_client
+lodi_server
+lodi_client
 
 # Debug files
 *.dSYM/
