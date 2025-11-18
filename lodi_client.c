@@ -8,10 +8,7 @@
 
 #define BUFFER_SIZE 1024
 
-void DieWithError(char *errorMessage) {
-    perror(errorMessage);
-    exit(1);
-}
+void DieWithError(char *errorMessage);  /* Error handling function */
 
 // Messages to PKE Server
 typedef struct {
@@ -95,19 +92,19 @@ int main(int argc, char *argv[]) {
     lodiServerIP = argv[4];
     lodiServerPort = atoi(argv[5]);
     
-    printf("Lodi Client\n");
-    printf("User ID: %u\n", userID);
-    printf("RSA Public Key (e): %lu\n", e);
-    printf("RSA Private Key (d): %lu\n", d);
-    printf("RSA Modulus (n): %lu\n\n", n);
+    printf("(LodiCLient) Lodi Client\n");
+    printf("(LodiCLient) User ID: %u\n", userID);
+    printf("(LodiCLient) RSA Public Key (e): %lu\n", e);
+    printf("(LodiCLient) RSA Private Key (d): %lu\n", d);
+    printf("(LodiCLient) RSA Modulus (n): %lu\n\n", n);
     
     // Create socket
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-        DieWithError("socket() failed");
+        DieWithError("(LodiCLient) socket() failed");
     
     // Register public key w PKE server
-    printf("Registering public key with PKE Server\n");
-    printf("Connecting to PKE Server at %s:%u\n", pkeServerIP, pkeServerPort);
+    printf("(LodiCLient) Registering public key with PKE Server\n");
+    printf("(LodiCLient) Connecting to PKE Server at %s:%u\n", pkeServerIP, pkeServerPort);
     
     // Construct PKE server address
     memset(&pkeServerAddr, 0, sizeof(pkeServerAddr));
@@ -121,38 +118,38 @@ int main(int argc, char *argv[]) {
     registerMsg.userID = userID;
     registerMsg.publicKey = publicKey;
     
-    printf("Sending registerKey message\n");
-    printf("  User ID: %u\n", registerMsg.userID);
-    printf("  Public Key: %u\n", registerMsg.publicKey);
+    printf("(LodiCLient) Sending registerKey message\n");
+    printf("(LodiCLient) User ID: %u\n", registerMsg.userID);
+    printf("(LodiCLient) Public Key: %u\n", registerMsg.publicKey);
     
     // Send to PKE Server
     if (sendto(sock, &registerMsg, sizeof(registerMsg), 0,
                (struct sockaddr *)&pkeServerAddr, sizeof(pkeServerAddr)) != sizeof(registerMsg))
-        DieWithError("sendto() failed");
+        DieWithError("(LodiCLient) sendto() failed");
     
-    printf("Waiting for acknowledgment from PKE Server...\n");
+    printf("(LodiCLient) Waiting for acknowledgment from PKE Server...\n");
     
     // Receive response
     fromSize = sizeof(fromAddr);
     if ((respLen = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                             (struct sockaddr *)&fromAddr, &fromSize)) < 0)
-        DieWithError("recvfrom() failed");
+        DieWithError("(LodiCLient) recvfrom() failed");
     
     PKServerToPClientOrLodiServer *pkeResponse = (PKServerToPClientOrLodiServer *)buffer;
     
     if (pkeResponse->messageType == ackRegisterKey) {
-        printf("Public key registered successfully\n");
-        printf("  Confirmed User ID: %u\n", pkeResponse->userID);
-        printf("  Confirmed Public Key: %u\n\n", pkeResponse->publicKey);
+        printf("(LodiCLient) Public key registered successfully\n");
+        printf("(LodiCLient) Confirmed User ID: %u\n", pkeResponse->userID);
+        printf("(LodiCLient) Confirmed Public Key: %u\n\n", pkeResponse->publicKey);
     } else {
-        printf("ERROR: Unexpected response from PKE Server\n");
+        printf("(LodiCLient) ERROR: Unexpected response from PKE Server\n");
         exit(1);
     }
     
     // Send Login to Lodi Server
     
-    printf("STEP 2: Logging in to Lodi Server\n");
-    printf("Connecting to Lodi Server at %s:%u\n", lodiServerIP, lodiServerPort);
+    printf("(LodiCLient) Logging in to Lodi Server\n");
+    printf("(LodiCLient) Connecting to Lodi Server at %s:%u\n", lodiServerIP, lodiServerPort);
     
     // Construct Lodi server address
     memset(&lodiServerAddr, 0, sizeof(lodiServerAddr));
@@ -174,35 +171,35 @@ int main(int argc, char *argv[]) {
     loginMsg.timestamp = timestamp;
     loginMsg.digitalSig = digitalSig;
     
-    printf("Sending login message\n");
-    printf("  User ID: %u\n", loginMsg.userID);
-    printf("  Timestamp: %lu\n", loginMsg.timestamp);
-    printf("  Digital Signature: %lu\n", loginMsg.digitalSig);
+    printf("(LodiCLient) Sending login message\n");
+    printf("(LodiCLient) User ID: %u\n", loginMsg.userID);
+    printf("(LodiCLient) Timestamp: %lu\n", loginMsg.timestamp);
+    printf("(LodiCLient) Digital Signature: %lu\n", loginMsg.digitalSig);
     
     // Send to Lodi Server
     if (sendto(sock, &loginMsg, sizeof(loginMsg), 0,
                (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) != sizeof(loginMsg))
         DieWithError("sendto() failed");
     
-    printf("Waiting for response from Lodi Server...\n");
+    printf("(LodiCLient) Waiting for response from Lodi Server...\n");
     
     // Receive response
     fromSize = sizeof(fromAddr);
     if ((respLen = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                             (struct sockaddr *)&fromAddr, &fromSize)) < 0)
-        DieWithError("recvfrom() failed");
+        DieWithError("(LodiCLient) recvfrom() failed");
     
     LodiServerToLodiClientAcks *lodiResponse = (LodiServerToLodiClientAcks *)buffer;
     
     if (lodiResponse->messageType == ackLogin) {
-        printf("Login successful\n");
-        printf("  Confirmed User ID: %u\n\n", lodiResponse->userID);
+        printf("(LodiCLient) Login successful\n");
+        printf("(LodiCLient) Confirmed User ID: %u\n\n", lodiResponse->userID);
     } else {
-        printf("ERROR: Unexpected response from Lodi Server\n");
+        printf("(LodiCLient) ERROR: Unexpected response from Lodi Server\n");
         exit(1);
     }
     
-    printf("Login process complete\n");
+    printf("(LodiCLient) Login process complete\n");
     
     close(sock);
     return 0;

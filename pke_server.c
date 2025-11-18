@@ -7,13 +7,9 @@
 
 #define BUFFER_SIZE 1024  
 
-/* error handling function */
-void DieWithError(char *errorMessage) {
-    perror(errorMessage);
-    exit(1);
-}
+void DieWithError(char *errorMessage);  /* Error handling function */
 
-// messages coming TO the PKE Server (from clients)
+// Messages coming to the PKE Server (from clients)
 typedef struct {
     enum {registerKey, requestKey} messageType;
     unsigned int userID;
@@ -29,6 +25,13 @@ typedef struct {
     int active;              
 } UserKeyEntry;
 
+// messages going from the PKE Server (to clients)
+typedef struct {
+    enum {ackRegisterKey, responsePublicKey} messageType;
+    unsigned int userID;
+    unsigned int publicKey;
+} PKServerToPClientOrLodiServer;
+
 // global database array
 UserKeyEntry keyDatabase[MAX_USERS];
 int totalUsers = 0;
@@ -39,7 +42,7 @@ void initializeDatabase() {
         keyDatabase[i].userID = 0;
         keyDatabase[i].publicKey = 0;
     }
-    printf("Database initialized (capacity: %d users)\n", MAX_USERS);
+    printf("(PKEServer) Database initialized (capacity: %d users)\n", MAX_USERS);
 }
 
 int storePublicKey(unsigned int userID, unsigned int publicKey) {
@@ -47,7 +50,7 @@ int storePublicKey(unsigned int userID, unsigned int publicKey) {
     for (int i = 0; i < MAX_USERS; i++) {
         if (keyDatabase[i].active && keyDatabase[i].userID == userID) {
             keyDatabase[i].publicKey = publicKey;
-            printf("Updated key for user %u\n", userID);
+            printf("(PKEServer) Updated key for user %u\n", userID);
             return 1;
         }
     }
@@ -59,13 +62,13 @@ int storePublicKey(unsigned int userID, unsigned int publicKey) {
             keyDatabase[i].publicKey = publicKey;
             keyDatabase[i].active = 1;
             totalUsers++;
-            printf("Stored new key for user %u (total users: %d)\n", 
+            printf("(PKEServer) Stored new key for user %u (total users: %d)\n", 
                    userID, totalUsers);
             return 1;
         }
     }
     
-    printf("ERROR: Database full!\n");
+    printf("(PKEServer) ERROR: Database full!\n");
     return 0;
 }
 
@@ -76,16 +79,9 @@ unsigned int getPublicKey(unsigned int userID) {
             return keyDatabase[i].publicKey;
         }
     }
-    printf("Key not found for user %u\n", userID);
+    printf("(PKEServer) Key not found for user %u\n", userID);
     return 0;  
 }
-
-// messages going FROM the PKE Server (to clients)
-typedef struct {
-    enum {ackRegisterKey, responsePublicKey} messageType;
-    unsigned int userID;
-    unsigned int publicKey;
-} PKServerToPClientOrLodiServer;
 
 int main(int argc, char *argv[]) {
     int sock;
@@ -99,18 +95,18 @@ int main(int argc, char *argv[]) {
 
     // check command line 
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <Server Port>\n", argv[0]);
+        fprintf(stderr, "(PKEServer) Usage: %s <Server Port>\n", argv[0]);
         exit(1);
     }
     
     serverPort = atoi(argv[1]);
-    printf("PKE Server starting on port %u...\n", serverPort);
+    printf("(PKEServer) PKE Server starting on port %u...\n", serverPort);
     
     // create socket
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         DieWithError("socket() failed");
     
-    printf("Socket created successfully!\n");
+    printf("(PKEServer) Socket created successfully!\n");
     
     // construct local address structure
     memset(&serverAddr, 0, sizeof(serverAddr));
@@ -118,14 +114,14 @@ int main(int argc, char *argv[]) {
     serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     serverAddr.sin_port = htons(serverPort);
     
-    printf("Address structure configured!\n");
+    printf("(PKEServer) Address structure configured!\n");
     
     // bind to the local address
     if (bind(sock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
-        DieWithError("bind() failed");
+        DieWithError("(PKEServer) bind() failed");
     
-    printf("Socket bound to port %u!\n", serverPort);
-    printf("PKE Server ready and listening...\n");
+    printf("(PKEServer) Socket bound to port %u!\n", serverPort);
+    printf("(PKEServer) PKE Server ready and listening...\n");
     
     // initialize database
     initializeDatabase();
@@ -133,14 +129,14 @@ int main(int argc, char *argv[]) {
     for (;;) {
        clientAddrLen = sizeof(clientAddr);
         
-        printf("Waiting for a message...");
+        printf("(PKEServer) Waiting for a message...");
         // if receive message 
         if ((recvMsgSize = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                                     (struct sockaddr *)&clientAddr, 
                                     &clientAddrLen)) < 0)
-            DieWithError("recvfrom() failed");
+            DieWithError("(PKEServer) recvfrom() failed");
         
-        printf("Received %d bytes from %s (port %d)\n", 
+        printf("(PKEServer) Received %d bytes from %s (port %d)\n", 
                recvMsgSize, 
                inet_ntoa(clientAddr.sin_addr),
                ntohs(clientAddr.sin_port));
@@ -148,9 +144,9 @@ int main(int argc, char *argv[]) {
         PClientToPKServer *request = (PClientToPKServer *)buffer;
         
         if (request->messageType == registerKey) {
-            printf("  Message Type: registerKey\n");
-            printf("  User ID: %u\n", request->userID);
-            printf("  Public Key: %u\n", request->publicKey);
+            printf("(PKEServer) Message Type: registerKey\n");
+            printf("(PKEServer) User ID: %u\n", request->userID);
+            printf("(PKEServer) Public Key: %u\n", request->publicKey);
             
             storePublicKey(request->userID, request->publicKey);
             
@@ -162,13 +158,13 @@ int main(int argc, char *argv[]) {
             if (sendto(sock, &response, sizeof(response), 0,
                        (struct sockaddr *)&clientAddr, 
                        sizeof(clientAddr)) != sizeof(response))
-                DieWithError("sendto() sent different number of bytes");
+                DieWithError("(PKEServer) sendto() sent different number of bytes");
             
-            printf("Sent ackRegisterKey to client\n");
+            printf("(PKEServer) Sent ackRegisterKey to client\n");
         }
         else if (request->messageType == requestKey) {
-            printf("  Message Type: requestKey\n");
-            printf("  Requested User ID: %u\n", request->userID);
+            printf("(PKEServer) Message Type: requestKey\n");
+            printf("(PKEServer) Requested User ID: %u\n", request->userID);
             
             unsigned int publicKey = getPublicKey(request->userID);
             
@@ -180,12 +176,12 @@ int main(int argc, char *argv[]) {
             if (sendto(sock, &response, sizeof(response), 0,
                        (struct sockaddr *)&clientAddr, 
                        sizeof(clientAddr)) != sizeof(response))
-                DieWithError("sendto() sent different number of bytes");
+                DieWithError("(PKEServer) sendto() sent different number of bytes");
             
-            printf("Sent responsePublicKey (key: %u)\n", publicKey);
+            printf("(PKEServer) Sent responsePublicKey (key: %u)\n", publicKey);
         }
         else {
-            printf("Message Type: UNKNOWN (%d)\n", request->messageType);
+            printf("(PKEServer) Message Type: UNKNOWN (%d)\n", request->messageType);
         }
     }
     
