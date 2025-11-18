@@ -261,16 +261,32 @@ void handleAuthRequest(int sock, TFAClientOrLodiServerToTFAServer *msg,
 
     printf("(TFAServer) Waiting for user approval...\n");
     
-    // Set a receive timeout so we don't block forever waiting for client
+    // Temporarily set a receive timeout so we don't block forever waiting for client
     struct timeval tv;
+    struct timeval tv_orig;
+    socklen_t optlen = sizeof(tv_orig);
+    int got_orig = 0;
+
     tv.tv_sec = 15; // wait up to 15 seconds for client response
     tv.tv_usec = 0;
+
+    if (getsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv_orig, &optlen) == 0)
+        got_orig = 1;
+
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
     fromSize = sizeof(fromAddr);
     if ((recvMsgSize = recvfrom(sock, &ackMsg, sizeof(ackMsg), 0,
                                 (struct sockaddr *)&fromAddr, &fromSize)) < 0)
     {
+        // restore original timeout (or clear) before returning
+        if (got_orig)
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv_orig, sizeof(tv_orig));
+        else {
+            struct timeval tv_clear = {0,0};
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv_clear, sizeof(tv_clear));
+        }
+
         printf("(TFAServer) Failed to receive ack from TFA Client (timeout or error)\n");
         // Inform Lodi server that authentication failed
         TFAServerToLodiServer failMsg;
@@ -282,6 +298,14 @@ void handleAuthRequest(int sock, TFAClientOrLodiServerToTFAServer *msg,
         else
             printf("(TFAServer) Sent failure response to Lodi Server due to timeout\n");
         return;
+    }
+
+    /* restore original timeout (or clear) now that recvfrom returned */
+    if (got_orig)
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv_orig, sizeof(tv_orig));
+    else {
+        struct timeval tv_clear = {0,0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv_clear, sizeof(tv_clear));
     }
     
     if (ackMsg.userID != msg->userID)
