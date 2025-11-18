@@ -4,14 +4,19 @@
 #include <stdlib.h>     
 #include <string.h>     
 #include <unistd.h>     
+#include <sys/time.h>
 
 #define MAX_USERS 100   
 
-void DieWithError(char *errorMessage);  /* Error handling function */
+void DieWithError(char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
 
 // Message Structs
 typedef struct {
-    enum {registerTFA, ackRegTFA, ackPushTFA, requestAuth} messageType;
+    enum {registerTFA, ackRegTFA, ackPushTFA, denyPushTFA, requestAuth} messageType;
     unsigned int userID;
     unsigned long timestamp;
     unsigned long digitalSig;
@@ -23,18 +28,18 @@ typedef struct {
 } TFAServerToTFAClient;
 
 typedef struct {
-    enum {responseAuth} messageType;
+    enum {responseAuth, responseAuthFail} messageType;
     unsigned int userID;
 } TFAServerToLodiServer;
 
 typedef struct {
-    enum {requestKey} messageType;
+    enum {registerKey, requestKey} messageType;
     unsigned int userID;
     unsigned int publicKey;
 } TFAServerToPKEServer;
 
 typedef struct {
-    enum {responsePublicKey} messageType;
+    enum {ackRegisterKey, responsePublicKey} messageType;
     unsigned int userID;
     unsigned int publicKey;
 } PKEServerToTFAServer;
@@ -252,23 +257,72 @@ void handleAuthRequest(int sock, TFAClientOrLodiServerToTFAServer *msg,
            inet_ntoa(userTable[userIndex].clientAddr.sin_addr),
            ntohs(userTable[userIndex].clientAddr.sin_port));
     
-    /* Wait for ackPushTFA from TFA Client */
+    // Wait for ackPushTFA from TFA Client 
+
     printf("(TFAServer) Waiting for user approval...\n");
     
+    // Set a receive timeout so we don't block forever waiting for client
+    struct timeval tv;
+    tv.tv_sec = 15; // wait up to 15 seconds for client response
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+
     fromSize = sizeof(fromAddr);
     if ((recvMsgSize = recvfrom(sock, &ackMsg, sizeof(ackMsg), 0,
                                 (struct sockaddr *)&fromAddr, &fromSize)) < 0)
     {
-        printf("(TFAServer) Failed to receive ack from TFA Client\n");
+        printf("(TFAServer) Failed to receive ack from TFA Client (timeout or error)\n");
+        // Inform Lodi server that authentication failed
+        TFAServerToLodiServer failMsg;
+        failMsg.messageType = responseAuthFail;
+        failMsg.userID = msg->userID;
+        if (sendto(sock, &failMsg, sizeof(failMsg), 0,
+                   (struct sockaddr *)lodiServerAddr, sizeof(*lodiServerAddr)) != sizeof(failMsg))
+            printf("(TFAServer) Failed to send failure response to Lodi Server\n");
+        else
+            printf("(TFAServer) Sent failure response to Lodi Server due to timeout\n");
         return;
     }
     
-    if (ackMsg.messageType != ackPushTFA || ackMsg.userID != msg->userID)
+    if (ackMsg.userID != msg->userID)
     {
-        printf("(TFAServer) Invalid ack from TFA Client\n");
+        printf("(TFAServer) Invalid ack from TFA Client (wrong user)\n");
+        // Notify Lodi server of failure
+        TFAServerToLodiServer failMsg;
+        failMsg.messageType = responseAuthFail;
+        failMsg.userID = msg->userID;
+        if (sendto(sock, &failMsg, sizeof(failMsg), 0,
+                   (struct sockaddr *)lodiServerAddr, sizeof(*lodiServerAddr)) != sizeof(failMsg))
+            printf("(TFAServer) Failed to send failure response to Lodi Server\n");
         return;
     }
-    
+
+    if (ackMsg.messageType == denyPushTFA)
+    {
+        printf("(TFAServer) User %u denied authentication\n", msg->userID);
+        TFAServerToLodiServer failMsg;
+        failMsg.messageType = responseAuthFail;
+        failMsg.userID = msg->userID;
+        if (sendto(sock, &failMsg, sizeof(failMsg), 0,
+                   (struct sockaddr *)lodiServerAddr, sizeof(*lodiServerAddr)) != sizeof(failMsg))
+            printf("(TFAServer) Failed to send failure response to Lodi Server\n");
+        else
+            printf("(TFAServer) Sent failure response to Lodi Server (user denied)\n");
+        return;
+    }
+
+    if (ackMsg.messageType != ackPushTFA)
+    {
+        printf("(TFAServer) Invalid ack from TFA Client (unexpected type=%d)\n", ackMsg.messageType);
+        TFAServerToLodiServer failMsg;
+        failMsg.messageType = responseAuthFail;
+        failMsg.userID = msg->userID;
+        if (sendto(sock, &failMsg, sizeof(failMsg), 0,
+                   (struct sockaddr *)lodiServerAddr, sizeof(*lodiServerAddr)) != sizeof(failMsg))
+            printf("(TFAServer) Failed to send failure response to Lodi Server\n");
+        return;
+    }
+
     printf("(TFAServer) User %u approved authentication\n", msg->userID);
     
     // Send responseAuth to Lodi Server 
@@ -305,15 +359,15 @@ int main(int argc, char *argv[])
     unsigned long n = 533;          
     
     // Test for # of Parameters
-    if (argc != 4)         
+    if (argc != 2)         
     {
-        fprintf(stderr,"(TFAServer) Usage:  %s <TFA SERVER PORT> <PKE SERVER IP> <PKE SERVER PORT>\n", argv[0]);
+        fprintf(stderr,"(TFAServer) Usage:  %s <Server IP Address>\n", argv[0]);
         exit(1);
     }
     
-    tfaServPort = atoi(argv[1]);     
-    pkeServerIP = argv[2];           
-    pkeServerPort = atoi(argv[3]);   
+    tfaServPort = 2925;     
+    pkeServerIP = argv[1];           
+    pkeServerPort = 2924;   
     
     printf("(TFAServer) TFA Server starting...\n");
     printf("(TFAServer) Listening on port: %u\n", tfaServPort);

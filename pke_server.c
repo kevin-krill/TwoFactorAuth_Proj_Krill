@@ -7,7 +7,11 @@
 
 #define BUFFER_SIZE 1024  
 
-void DieWithError(char *errorMessage);  /* Error handling function */
+void DieWithError(char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
 
 // Messages coming to the PKE Server (from clients)
 typedef struct {
@@ -55,7 +59,7 @@ int storePublicKey(unsigned int userID, unsigned int publicKey) {
         }
     }
     
-    // find empty slot
+    // Find empty slot
     for (int i = 0; i < MAX_USERS; i++) {
         if (!keyDatabase[i].active) {
             keyDatabase[i].userID = userID;
@@ -93,22 +97,22 @@ int main(int argc, char *argv[]) {
     char buffer[BUFFER_SIZE];
     int recvMsgSize;
 
-    // check command line 
-    if (argc != 2) {
-        fprintf(stderr, "(PKEServer) Usage: %s <Server Port>\n", argv[0]);
+    // No command-line arguments expected
+    if (argc != 1) {
+        fprintf(stderr, "Usage: %s\n", argv[0]);
         exit(1);
     }
     
-    serverPort = atoi(argv[1]);
+    serverPort = 2924;
     printf("(PKEServer) PKE Server starting on port %u...\n", serverPort);
     
-    // create socket
+    // Create socket
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         DieWithError("socket() failed");
     
     printf("(PKEServer) Socket created successfully!\n");
     
-    // construct local address structure
+    // Construct local address structure
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -116,21 +120,21 @@ int main(int argc, char *argv[]) {
     
     printf("(PKEServer) Address structure configured!\n");
     
-    // bind to the local address
+    // Bind 
     if (bind(sock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
         DieWithError("(PKEServer) bind() failed");
     
     printf("(PKEServer) Socket bound to port %u!\n", serverPort);
     printf("(PKEServer) PKE Server ready and listening...\n");
     
-    // initialize database
+    // Initialize database
     initializeDatabase();
     
     for (;;) {
        clientAddrLen = sizeof(clientAddr);
         
         printf("(PKEServer) Waiting for a message...");
-        // if receive message 
+        // If receive message 
         if ((recvMsgSize = recvfrom(sock, buffer, BUFFER_SIZE, 0,
                                     (struct sockaddr *)&clientAddr, 
                                     &clientAddrLen)) < 0)
@@ -143,6 +147,7 @@ int main(int argc, char *argv[]) {
         
         PClientToPKServer *request = (PClientToPKServer *)buffer;
         
+        // Check if Register 
         if (request->messageType == registerKey) {
             printf("(PKEServer) Message Type: registerKey\n");
             printf("(PKEServer) User ID: %u\n", request->userID);
@@ -155,6 +160,7 @@ int main(int argc, char *argv[]) {
             response.userID = request->userID;
             response.publicKey = request->publicKey;
             
+            // Send
             if (sendto(sock, &response, sizeof(response), 0,
                        (struct sockaddr *)&clientAddr, 
                        sizeof(clientAddr)) != sizeof(response))
@@ -162,6 +168,7 @@ int main(int argc, char *argv[]) {
             
             printf("(PKEServer) Sent ackRegisterKey to client\n");
         }
+        // Check if request
         else if (request->messageType == requestKey) {
             printf("(PKEServer) Message Type: requestKey\n");
             printf("(PKEServer) Requested User ID: %u\n", request->userID);

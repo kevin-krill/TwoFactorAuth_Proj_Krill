@@ -9,20 +9,31 @@
 #define BUFFER_SIZE 1024
 #define MAX_TIMESTAMP_DIFF 30  // 30 seconds tolerance for timestamp
 
-void DieWithError(char *errorMessage);
+void DieWithError(char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
 
 
-// toLodiServ (received messages) 
 typedef struct {
-    enum {login, ackRegisterKey, responsePublicKey, responseAuth
-    } messageType;
-    unsigned int userID;               
-    unsigned int recipientID;          
-    unsigned long timestamp;           
-    unsigned long digitalSig;          
-    unsigned int publicKey;            
-    
-} toLodiServer;
+    enum { login } messageType;    
+    unsigned int  userID; 
+    unsigned int recipientID;         
+    unsigned long timestamp;        
+    unsigned long digitalSig;       
+} LodiClientToLodiServer;
+
+typedef struct {
+    enum { ackRegisterKey, responsePublicKey } messageType;
+    unsigned int userID;
+    unsigned int publicKey;
+} PKServerToPClientOrLodiServer;
+
+typedef struct {
+    enum { responseAuth, responseAuthFail } messageType;
+    unsigned int userID;
+} TFAServerToLodiServer;
 
 // To Lodi Client
 typedef struct {
@@ -32,15 +43,17 @@ typedef struct {
 
 // To PKE Server 
 typedef struct {
-    enum {requestKey} messageType;
+    enum {registerKey, requestKey} messageType;
     unsigned int userID;             
     unsigned int publicKey;            
 } LodiServerToPKEServer;
 
 // To TFA Server (request authentication)
 typedef struct {
-    enum {requestAuth} messageType;
-    unsigned int userID;               
+    enum {registerTFA, ackRegTFA, ackPushTFA, denyPushTFA, requestAuth} messageType;
+    unsigned int userID; 
+    unsigned long timestamp;
+    unsigned long digitalSig;
 } LodiServerToTFAServer;
 
 // RSA 
@@ -63,7 +76,7 @@ unsigned int requestPublicKey(int sock, char *pkeServerIP, unsigned short pkeSer
                               unsigned int userID, unsigned long n) {
     struct sockaddr_in pkeServerAddr;
     LodiServerToPKEServer request;
-    toLodiServer response;  
+    PKServerToPClientOrLodiServer response;  
     int recvMsgSize; 
     
     printf("\n(LodiServer) Requesting public key for user %u from PKE Server...\n", userID);
@@ -117,7 +130,7 @@ int requestTFAAuthentication(int sock, char *tfaServerIP, unsigned short tfaServ
                              unsigned int userID) {
     struct sockaddr_in tfaServerAddr;
     LodiServerToTFAServer request;
-    toLodiServer response; 
+    TFAServerToLodiServer response; 
     int recvMsgSize;
     
     printf("\n(LodiServer) Requesting authentication for user %u from TFA Server...\n", userID);
@@ -143,6 +156,7 @@ int requestTFAAuthentication(int sock, char *tfaServerIP, unsigned short tfaServ
     printf("(LodiServer) Waiting for user to approve on TFA client...\n");
     
     // Receive response from TFA Server
+
     struct sockaddr_in fromAddr;
     unsigned int fromSize = sizeof(fromAddr);
     
@@ -159,7 +173,11 @@ int requestTFAAuthentication(int sock, char *tfaServerIP, unsigned short tfaServ
         printf("(LodiServer) Authentication successful for user %u\n", userID);
         return 1;
     }
-    
+    else if (response.messageType == responseAuthFail && response.userID == userID) {
+        printf("(LodiServer) Authentication denied for user %u\n", userID);
+        return 0;
+    }
+
     printf("(LodiServer) Error: Authentication failed for user %u\n", userID);
     return 0;
 }
@@ -175,25 +193,23 @@ int main(int argc, char *argv[]) {
     unsigned short pkeServerPort;
     char *tfaServerIP;
     unsigned short tfaServerPort;
-    toLodiServer incomingMsg;  
+    LodiClientToLodiServer incomingMsg;  
     int recvMsgSize;
     unsigned long n = 533;  
 
-    if (argc != 6) {
-        fprintf(stderr, "Usage: %s <Lodi Port> <PKE IP> <PKE Port> <TFA IP> <TFA Port>\n", argv[0]);
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <IP Address>\n", argv[0]);
         exit(1);
     }
     
-    lodiServerPort = atoi(argv[1]);
-    pkeServerIP = argv[2];
-    pkeServerPort = atoi(argv[3]);
-    tfaServerIP = argv[4];
-    tfaServerPort = atoi(argv[5]);
+    lodiServerPort = 2926; // 
+    pkeServerIP = argv[1];
+    pkeServerPort = 2924;//
+    tfaServerIP = argv[1];
+    tfaServerPort = 2925;//
     
     printf("(LodiServer) Lodi Server: \n");
     printf("(LodiServer) Listening on port: %u\n", lodiServerPort);
-    printf("(LodiServer) PKE Server: %s:%u\n", pkeServerIP, pkeServerPort);
-    printf("(LodiServer) TFA Server: %s:%u\n", tfaServerIP, tfaServerPort);
     printf("(LodiServer) RSA Modulus (n): %lu\n", n);
     printf("\n\n");
     
@@ -247,7 +263,7 @@ int main(int argc, char *argv[]) {
         printf("(LodiServer) Digital Signature: %lu\n", incomingMsg.digitalSig);
         
         // verify timestamp 
-        unsigned long currentTime = time(NULL);
+        unsigned long currentTime = time(NULL) % 500;
         long timeDiff = (long)(currentTime - incomingMsg.timestamp);
         
         printf("\n(LodiServer) Step 1: Verifying timestamp...\n");
@@ -286,16 +302,22 @@ int main(int argc, char *argv[]) {
             continue;
         }
         printf("(LodiServer) SUCCESS: Digital signature verified\n");
-        
-        // Request TFA Auth
-        printf("\n(LodiServer) Step 3: Requesting TFA authentication...\n");
-        
-        if (!requestTFAAuthentication(sock, tfaServerIP, tfaServerPort, incomingMsg.userID)) {
-            printf("(LodiServer) FAILED: TFA authentication failed\n");
-            printf("(LodiServer) Rejecting login from user %u\n\n", incomingMsg.userID);
+
+        // Require TFA
+        printf("(LodiServer) Step 3: Requesting Two-Factor Authentication\n");
+        int tfa_ok = requestTFAAuthentication(
+            sock,
+            tfaServerIP,
+            tfaServerPort,
+            incomingMsg.userID
+        );
+        if (!tfa_ok) {
+            printf("(LodiServer) FAILED: TFA authentication for user %u\n", incomingMsg.userID);
             continue;
         }
-        printf("(LodiServer) SUCCESS: TFA authentication completed\n");
+        printf("(LodiServer) SUCCESS: TFA approved for user %u\n", incomingMsg.userID);
+       
+        
         printf("\n(LodiServer) All authentication steps passed!\n");
         printf("(LodiServer) Sending ackLogin to client...\n");
         

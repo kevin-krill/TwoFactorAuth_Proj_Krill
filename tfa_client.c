@@ -1,20 +1,24 @@
-#include <stdio.h>      /* for printf() and fprintf() */
-#include <sys/socket.h> /* for socket(), connect(), sendto(), and recvfrom() */
-#include <arpa/inet.h>  /* for sockaddr_in and inet_addr() */
-#include <stdlib.h>     /* for atoi() and exit() */
-#include <string.h>     /* for memset() */
-#include <unistd.h>     /* for close() */
-#include <time.h>       /* for time() */
+#include <stdio.h>      
+#include <sys/socket.h> 
+#include <arpa/inet.h>  
+#include <stdlib.h>     
+#include <string.h>    
+#include <unistd.h>     
+#include <time.h>       
 
-void DieWithError(char *errorMessage);  /* Error handling function */
+void DieWithError(char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
 
 // Structs
 typedef struct {
-    enum {registerTFA, ackRegTFA, ackPushTFA} messageType;
+    enum {registerTFA, ackRegTFA, ackPushTFA, denyPushTFA, requestAuth} messageType;
     unsigned int userID;
     unsigned long timestamp;
     unsigned long digitalSig;
-} TFAClientToTFAServer;
+} TFAClientOrLodiServerToTFAServer;
 
 typedef struct {
     enum {confirmTFA, pushTFA} messageType;
@@ -41,7 +45,7 @@ unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n)
 void registerWithTFAServer(int sock, struct sockaddr_in *tfaServAddr,
                            unsigned int userID, unsigned long privateKey, unsigned long n)
 {
-    TFAClientToTFAServer registerMsg, ackMsg;
+    TFAClientOrLodiServerToTFAServer registerMsg, ackMsg;
     TFAServerToTFAClient confirmMsg;
     unsigned long randomInt;
     unsigned int fromSize;
@@ -51,7 +55,7 @@ void registerWithTFAServer(int sock, struct sockaddr_in *tfaServAddr,
     printf("(TFAClient) User ID: %u\n", userID);
     
     // Timestamp 
-    randomInt = time(NULL);
+    randomInt = time(NULL) % 500;
     printf("(TFAClient) Generated timestamp: %lu\n", randomInt);
     
     // Create DS
@@ -102,15 +106,16 @@ void listenForPushNotifications(int sock, struct sockaddr_in *tfaServAddr,
                                 unsigned int userID)
 {
     TFAServerToTFAClient pushMsg;
-    TFAClientToTFAServer ackMsg;
+    TFAClientOrLodiServerToTFAServer ackMsg;
     struct sockaddr_in fromAddr;
     unsigned int fromSize;
     int recvMsgSize;
     char response[10];
     
     printf("(TFAClient) TFA Client Listening \n");
-    printf("(TFAClient) Waiting for push notifications...\n");
     printf("(TFAClient) User ID: %u\n", userID);
+    printf("(TFAClient) Waiting for push notifications...\n");
+    
     
     
     for (;;) 
@@ -165,7 +170,19 @@ void listenForPushNotifications(int sock, struct sockaddr_in *tfaServAddr,
             }
             else
             {
-                printf("(TFAClient) Denied! Not sending acknowledgment.\n");
+                printf("(TFAClient) Denied! Sending denyPushTFA to TFA Server...\n");
+
+                // Send deny ack so the TFA server knows user rejected
+                ackMsg.messageType = denyPushTFA;
+                ackMsg.userID = userID;
+                ackMsg.timestamp = 0;
+                ackMsg.digitalSig = 0;
+
+                if (sendto(sock, &ackMsg, sizeof(ackMsg), 0,
+                           (struct sockaddr *)&fromAddr, sizeof(fromAddr)) != sizeof(ackMsg))
+                    DieWithError("(TFAClient) sendto() sent a different number of bytes than expected");
+
+                printf("(TFAClient) denyPushTFA sent to TFA Server\n");
             }
         }
         
@@ -175,26 +192,26 @@ void listenForPushNotifications(int sock, struct sockaddr_in *tfaServAddr,
 
 int main(int argc, char *argv[])
 {
-    int sock;                        /* Socket descriptor */
-    struct sockaddr_in tfaServAddr;  /* TFA server address */
-    unsigned short tfaServPort;      /* TFA server port */
-    char *servIP;                    /* Server IP address */
-    unsigned int userID;             /* User ID */
-    unsigned long privateKey;        /* User's private key */
-    unsigned long n = 533;           /* RSA modulus */
-    struct sockaddr_in localAddr;    /* Local address for binding */
+    int sock;                        
+    struct sockaddr_in tfaServAddr;  
+    unsigned short tfaServPort;      
+    char *servIP;                    
+    unsigned int userID;             
+    unsigned long privateKey;        
+    unsigned long n = 533;           
+    struct sockaddr_in localAddr;    
     
-    if (argc != 5)    /* Test for correct number of arguments */
+    if (argc != 3)    
     {
-        fprintf(stderr, "(TFAClient) Usage: %s <Server IP> <Server Port> <User ID> <Private Key>\n",
+        fprintf(stderr, "(TFAClient) Usage: %s <Server IP> <User ID> \n",
                 argv[0]);
         exit(1);
     }
     
-    servIP = argv[1];                /* First arg: server IP address (dotted quad) */
-    tfaServPort = atoi(argv[2]);     /* Second arg: server port */
-    userID = atoi(argv[3]);          /* Third arg: user ID */
-    privateKey = atoi(argv[4]);      /* Fourth arg: private key */
+    servIP = argv[1];                
+    tfaServPort = 2925;     
+    userID = atoi(argv[2]);         
+    privateKey = 37;    
     
     printf("(TFAClient) TFA Client\n");
     printf("(TFAClient) TFA Server: %s:%u\n", servIP, tfaServPort);
@@ -207,10 +224,10 @@ int main(int argc, char *argv[])
         DieWithError("(TFAClient) socket() failed");
     
     // Construct server address
-    memset(&tfaServAddr, 0, sizeof(tfaServAddr));      /* Zero out structure */
-    tfaServAddr.sin_family = AF_INET;                  /* Internet addr family */
-    tfaServAddr.sin_addr.s_addr = inet_addr(servIP);   /* Server IP address */
-    tfaServAddr.sin_port = htons(tfaServPort);         /* Server port */
+    memset(&tfaServAddr, 0, sizeof(tfaServAddr));      
+    tfaServAddr.sin_family = AF_INET;                  
+    tfaServAddr.sin_addr.s_addr = inet_addr(servIP);  
+    tfaServAddr.sin_port = htons(tfaServPort);         
     
     memset(&localAddr, 0, sizeof(localAddr));
     localAddr.sin_family = AF_INET;
