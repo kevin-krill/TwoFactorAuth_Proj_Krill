@@ -43,6 +43,10 @@ typedef struct {
     unsigned int userID;
 } LodiServerToLodiClientAcks;
 
+/* NOTE: removed duplicate TCP/extended message typedefs —
+   the simple `PClientToLodiServer` and `LodiServerToLodiClientAcks`
+   defined above are used for the login exchange. */
+
 // RSA
 // Modular exponentiation: (base^exp) mod n
 unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
@@ -63,6 +67,14 @@ unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
 unsigned long createDigitalSignature(unsigned long timestamp, unsigned long privateKey, unsigned long n) {
     return modExp(timestamp, privateKey, n);
 }
+
+char *getUserAction() {
+    static char action[10];
+    printf("Enter action (register/login): ");
+    scanf("%s", action);
+    return action;
+}
+
 
 int main(int argc, char *argv[]) {
     int sock;
@@ -85,8 +97,8 @@ int main(int argc, char *argv[]) {
     unsigned int publicKey = e;
     
     // Check command line arguments
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <ServerIP> <UserID> <register|login>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <ServerIP> <UserID> \n", argv[0]);
         exit(1);
     }
     
@@ -95,7 +107,7 @@ int main(int argc, char *argv[]) {
     pkeServerPort = 2924;
     lodiServerIP = argv[1];
     lodiServerPort = 2926;
-    char *action = argv[3];
+    char *action = getUserAction(); // Function to get user action: "register" or "login"
 
     printf("(LodiCLient) Lodi Client\n");
     printf("(LodiCLient) User ID: %u\n", userID);
@@ -107,6 +119,7 @@ int main(int argc, char *argv[]) {
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         DieWithError("(LodiCLient) socket() failed");
 
+       
     // Register public key w PKE server
     if (strcmp(action, "register") == 0) {
         
@@ -185,32 +198,64 @@ int main(int argc, char *argv[]) {
         printf("(LodiCLient) Timestamp: %lu\n", loginMsg.timestamp);
         printf("(LodiCLient) Digital Signature: %lu\n", loginMsg.digitalSig);
         
-        // Send to Lodi Server
-        if (sendto(sock, &loginMsg, sizeof(loginMsg), 0,
-                (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) != sizeof(loginMsg))
-            DieWithError("sendto() failed");
-        
-        printf("(LodiCLient) Waiting for response from Lodi Server...\n");
-        
-        // Receive response:
-        // Check to make sure Client is not waiting forever
-        struct timeval tv = {10, 0}; 
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        /* Create a separate TCP socket for the login */
+        int tcpSock;
+        if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+            DieWithError("(LodiCLient) TCP socket() failed");
 
-        fromSize = sizeof(fromAddr);
-        if ((respLen = recvfrom(sock, buffer, BUFFER_SIZE, 0,
-                                (struct sockaddr *)&fromAddr, &fromSize)) < 0)
-            DieWithError("(LodiCLient) Login Failed");
-        
+        if (connect(tcpSock, (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) < 0) {
+            close(tcpSock);
+            DieWithError("(LodiCLient) connect() failed");
+        }
+
+        /* Send the login struct over TCP (ensure all bytes are sent) */
+        unsigned int loginMsgLen = sizeof(loginMsg);
+        unsigned int sent = 0;
+        while (sent < loginMsgLen) {
+            int s = send(tcpSock, ((char *)&loginMsg) + sent, loginMsgLen - sent, 0);
+            if (s <= 0) {
+                close(tcpSock);
+                DieWithError("(LodiCLient) send() failed");
+            }
+            sent += s;
+        }
+
+        printf("(LodiCLient) Login message sent to Lodi Server\n");
+        printf("(LodiCLient) Waiting for response from Lodi Server...\n");
+
+        /* Set a receive timeout on TCP socket */
+        struct timeval tv = {10, 0};
+        setsockopt(tcpSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        /* Receive exactly the ACK struct size into buffer (handle partial reads)
+           Note: buffer is large enough. */
+        unsigned int expected = sizeof(LodiServerToLodiClientAcks);
+        unsigned int totalBytesRcvd = 0;
+        while (totalBytesRcvd < expected) {
+            int r = recv(tcpSock, buffer + totalBytesRcvd, (int)(expected - totalBytesRcvd), 0);
+            if (r < 0) {
+                close(tcpSock);
+                DieWithError("(LodiCLient) recv() failed");
+            }
+            if (r == 0) break; /* connection closed */
+            totalBytesRcvd += r;
+        }
+
+        if (totalBytesRcvd < expected) {
+            close(tcpSock);
+            DieWithError("(LodiCLient) Incomplete response from Lodi Server");
+        }
+
         LodiServerToLodiClientAcks *lodiResponse = (LodiServerToLodiClientAcks *)buffer;
-        
         if (lodiResponse->messageType == ackLogin) {
             printf("(LodiCLient) Login successful\n");
             printf("(LodiCLient) Confirmed User ID: %u\n\n", lodiResponse->userID);
         } else {
-            printf("(LodiCLient) ERROR: Unexpected response from Lodi Server\n");
-            exit(1);
+            close(tcpSock);
+            DieWithError("(LodiCLient) ERROR: Unexpected response from Lodi Server");
         }
+
+        close(tcpSock);
     }else{
         DieWithError("Use <register|login>");
     }

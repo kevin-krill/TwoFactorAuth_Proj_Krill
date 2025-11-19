@@ -56,6 +56,23 @@ typedef struct {
     unsigned long digitalSig;
 } LodiServerToTFAServer;
 
+// TCP Connection client to server message
+typedef struct {
+    enum{login,post,feed,follow,unfollow,logout} messageType;
+    unsigned int userID;
+    unsigned int recipientID;
+    unsigned long timestamp;
+    unsigned long digitalSig;
+    char message[100];
+} PClientToLodiServer;
+
+//TCP connnections server to client acks
+typedef struct {
+    enum{ackLogin,ackPost,ackFeed,ackFollow,ackUnfollow,ackLogout} messageType;
+    unsigned int userID;
+    char message[100];
+} LodiServerMessage;
+
 // RSA 
 unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
     unsigned long result = 1;
@@ -217,6 +234,17 @@ int main(int argc, char *argv[]) {
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         DieWithError("(LodiServer) socket() failed");
 
+     //TCP socket creation 
+    if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+        DieWithError("(LodiServer) TCP socket() failed");
+
+
+
+
+
+        ////implement TCP connection here////
+
+        
     printf("(LodiServer) Socket created successfully\n");
 
     // Configure server address
