@@ -28,24 +28,22 @@ typedef struct {
     unsigned int publicKey;
 } PKServerToPClientOrLodiServer;
 
-// Messages to Lodi Server
+// Messages to Lodi Server (TCP Connection)
 typedef struct {
-    enum {login} messageType;
+    enum{login,post,feed,follow,unfollow,logout} messageType;
     unsigned int userID;
     unsigned int recipientID;
     unsigned long timestamp;
     unsigned long digitalSig;
+    char message[100];
 } PClientToLodiServer;
 
-// Messages from Lodi Server
+// Messages from Lodi Server (TCP Acknowledgments)
 typedef struct {
-    enum {ackLogin} messageType;
+    enum{ackLogin,ackPost,ackFeed,ackFollow,ackUnfollow,ackLogout} messageType;
     unsigned int userID;
-} LodiServerToLodiClientAcks;
-
-/* NOTE: removed duplicate TCP/extended message typedefs —
-   the simple `PClientToLodiServer` and `LodiServerToLodiClientAcks`
-   defined above are used for the login exchange. */
+    char message[100];
+} LodiServerMessage;
 
 // RSA
 // Modular exponentiation: (base^exp) mod n
@@ -73,6 +71,205 @@ char *getUserAction() {
     printf("Enter action (register/login): ");
     scanf("%s", action);
     return action;
+}
+
+// Helper function to send request to Lodi Server and receive response
+// Returns 0 on failure, 1 on success
+int sendRequestToServer(char *lodiServerIP, unsigned short lodiServerPort,
+                        PClientToLodiServer *request, LodiServerMessage *response) {
+    int tcpSock;
+    struct sockaddr_in lodiServerAddr;
+    char buffer[BUFFER_SIZE];
+
+    // Create TCP socket
+    if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        printf("(LodiClient) Error: Failed to create TCP socket\n");
+        return 0;
+    }
+
+    // Configure server address
+    memset(&lodiServerAddr, 0, sizeof(lodiServerAddr));
+    lodiServerAddr.sin_family = AF_INET;
+    lodiServerAddr.sin_addr.s_addr = inet_addr(lodiServerIP);
+    lodiServerAddr.sin_port = htons(lodiServerPort);
+
+    // Connect to server
+    if (connect(tcpSock, (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) < 0) {
+        printf("(LodiClient) Error: Failed to connect to server\n");
+        close(tcpSock);
+        return 0;
+    }
+
+    // Send request (ensure all bytes sent)
+    unsigned int requestLen = sizeof(PClientToLodiServer);
+    unsigned int sent = 0;
+    while (sent < requestLen) {
+        int s = send(tcpSock, ((char *)request) + sent, requestLen - sent, 0);
+        if (s <= 0) {
+            printf("(LodiClient) Error: Failed to send request\n");
+            close(tcpSock);
+            return 0;
+        }
+        sent += s;
+    }
+
+    // Set receive timeout
+    struct timeval tv = {10, 0};
+    setsockopt(tcpSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    // Receive response (handle partial reads)
+    unsigned int expected = sizeof(LodiServerMessage);
+    unsigned int totalBytesRcvd = 0;
+    while (totalBytesRcvd < expected) {
+        int r = recv(tcpSock, buffer + totalBytesRcvd, (int)(expected - totalBytesRcvd), 0);
+        if (r < 0) {
+            printf("(LodiClient) Error: Failed to receive response\n");
+            close(tcpSock);
+            return 0;
+        }
+        if (r == 0) break; // Connection closed
+        totalBytesRcvd += r;
+    }
+
+    if (totalBytesRcvd < expected) {
+        printf("(LodiClient) Error: Incomplete response from server\n");
+        close(tcpSock);
+        return 0;
+    }
+
+    // Copy response
+    memcpy(response, buffer, sizeof(LodiServerMessage));
+
+    // Close connection
+    close(tcpSock);
+
+    return 1;
+}
+
+// Function to display session menu
+void displayMenu() {
+    printf("\n========== LODI CLIENT MENU ==========\n");
+    printf("1. Post a message\n");
+    printf("2. View feed (posts from idols)\n");
+    printf("3. Follow an idol\n");
+    printf("4. Unfollow an idol\n");
+    printf("5. Logout\n");
+    printf("======================================\n");
+    printf("Enter your choice (1-5): ");
+}
+
+// Function to get session choice
+int getSessionChoice() {
+    int choice;
+    if (scanf("%d", &choice) != 1) {
+        while(getchar() != '\n'); // Clear input buffer
+        return -1;
+    }
+    while(getchar() != '\n'); // Clear remaining input
+    return choice;
+}
+
+// Skeleton: Post a message
+int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
+               unsigned int userID, unsigned long d, unsigned long n) {
+    printf("\n--- POST MESSAGE ---\n");
+
+    // TODO: Implement posting functionality
+    // 1. Get message content from user (fgets into char array)
+    // 2. Create timestamp: time(NULL) % 500
+    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // 4. Fill PClientToLodiServer struct:
+    //    - messageType = post
+    //    - userID, recipientID = 0, timestamp, digitalSig
+    //    - Copy message content into message field
+    // 5. Call sendRequestToServer()
+    // 6. Check response.messageType == ackPost
+    // 7. Display success message
+
+    printf("(Feature not yet implemented)\n");
+    return 0;
+}
+
+// Skeleton: View feed (get posts from followed idols)
+int handleFeed(char *lodiServerIP, unsigned short lodiServerPort,
+               unsigned int userID, unsigned long d, unsigned long n) {
+    printf("\n--- VIEW FEED ---\n");
+
+    // TODO: Implement feed retrieval functionality
+    // 1. Create timestamp: time(NULL) % 500
+    // 2. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // 3. Fill PClientToLodiServer struct:
+    //    - messageType = feed
+    //    - userID, recipientID = 0, timestamp, digitalSig
+    //    - message field empty
+    // 4. Call sendRequestToServer()
+    // 5. Check response.messageType == ackFeed
+    // 6. Parse and display posts from response.message field
+
+    printf("(Feature not yet implemented)\n");
+    return 0;
+}
+
+// Skeleton: Follow an idol
+int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
+                 unsigned int userID, unsigned long d, unsigned long n) {
+    printf("\n--- FOLLOW IDOL ---\n");
+
+    // TODO: Implement follow functionality
+    // 1. Get idol's userID from user input (scanf)
+    // 2. Create timestamp: time(NULL) % 500
+    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // 4. Fill PClientToLodiServer struct:
+    //    - messageType = follow
+    //    - userID, recipientID = idol's userID, timestamp, digitalSig
+    //    - message field empty
+    // 5. Call sendRequestToServer()
+    // 6. Check response.messageType == ackFollow
+    // 7. Display success message
+
+    printf("(Feature not yet implemented)\n");
+    return 0;
+}
+
+// Skeleton: Unfollow an idol
+int handleUnfollow(char *lodiServerIP, unsigned short lodiServerPort,
+                   unsigned int userID, unsigned long d, unsigned long n) {
+    printf("\n--- UNFOLLOW IDOL ---\n");
+
+    // TODO: Implement unfollow functionality
+    // 1. Get idol's userID from user input (scanf)
+    // 2. Create timestamp: time(NULL) % 500
+    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // 4. Fill PClientToLodiServer struct:
+    //    - messageType = unfollow
+    //    - userID, recipientID = idol's userID, timestamp, digitalSig
+    //    - message field empty
+    // 5. Call sendRequestToServer()
+    // 6. Check response.messageType == ackUnfollow
+    // 7. Display success message
+
+    printf("(Feature not yet implemented)\n");
+    return 0;
+}
+
+// Skeleton: Logout
+int handleLogout(char *lodiServerIP, unsigned short lodiServerPort,
+                 unsigned int userID, unsigned long d, unsigned long n) {
+    printf("\n--- LOGOUT ---\n");
+
+    // TODO: Implement logout functionality
+    // 1. Create timestamp: time(NULL) % 500
+    // 2. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // 3. Fill PClientToLodiServer struct:
+    //    - messageType = logout
+    //    - userID, recipientID = 0, timestamp, digitalSig
+    //    - message field empty
+    // 4. Call sendRequestToServer()
+    // 5. Check response.messageType == ackLogout
+    // 6. Display logout confirmation
+
+    printf("Logging out...\n");
+    return 1; // Return 1 to signal logout
 }
 
 
@@ -189,9 +386,10 @@ int main(int argc, char *argv[]) {
         PClientToLodiServer loginMsg;
         loginMsg.messageType = login;
         loginMsg.userID = userID;
-        loginMsg.recipientID = 0; 
+        loginMsg.recipientID = 0;
         loginMsg.timestamp = timestamp;
         loginMsg.digitalSig = digitalSig;
+        memset(loginMsg.message, 0, sizeof(loginMsg.message)); // Initialize message field
         
         printf("(LodiCLient) Sending login message\n");
         printf("(LodiCLient) User ID: %u\n", loginMsg.userID);
@@ -229,7 +427,7 @@ int main(int argc, char *argv[]) {
 
         /* Receive exactly the ACK struct size into buffer (handle partial reads)
            Note: buffer is large enough. */
-        unsigned int expected = sizeof(LodiServerToLodiClientAcks);
+        unsigned int expected = sizeof(LodiServerMessage);
         unsigned int totalBytesRcvd = 0;
         while (totalBytesRcvd < expected) {
             int r = recv(tcpSock, buffer + totalBytesRcvd, (int)(expected - totalBytesRcvd), 0);
@@ -246,16 +444,51 @@ int main(int argc, char *argv[]) {
             DieWithError("(LodiCLient) Incomplete response from Lodi Server");
         }
 
-        LodiServerToLodiClientAcks *lodiResponse = (LodiServerToLodiClientAcks *)buffer;
+        LodiServerMessage *lodiResponse = (LodiServerMessage *)buffer;
         if (lodiResponse->messageType == ackLogin) {
             printf("(LodiCLient) Login successful\n");
-            printf("(LodiCLient) Confirmed User ID: %u\n\n", lodiResponse->userID);
+            printf("(LodiCLient) Confirmed User ID: %u\n", lodiResponse->userID);
+            printf("(LodiCLient) Server message: %s\n\n", lodiResponse->message);
+
+            // Close connection after successful login
+            close(tcpSock);
+            printf("(LodiCLient) Login connection closed\n");
+
+            // ========== CONTINUOUS SESSION LOOP ==========
+            printf("(LodiCLient) Starting session...\n");
+            int sessionActive = 1;
+
+            while (sessionActive) {
+                displayMenu();
+                int choice = getSessionChoice();
+
+                switch (choice) {
+                    case 1:
+                        handlePost(lodiServerIP, lodiServerPort, userID, d, n);
+                        break;
+                    case 2:
+                        handleFeed(lodiServerIP, lodiServerPort, userID, d, n);
+                        break;
+                    case 3:
+                        handleFollow(lodiServerIP, lodiServerPort, userID, d, n);
+                        break;
+                    case 4:
+                        handleUnfollow(lodiServerIP, lodiServerPort, userID, d, n);
+                        break;
+                    case 5:
+                        sessionActive = !handleLogout(lodiServerIP, lodiServerPort, userID, d, n);
+                        break;
+                    default:
+                        printf("Invalid choice. Please enter a number between 1-5.\n");
+                        break;
+                }
+            }
+
+            printf("(LodiCLient) Session ended.\n");
         } else {
             close(tcpSock);
             DieWithError("(LodiCLient) ERROR: Unexpected response from Lodi Server");
         }
-
-        close(tcpSock);
     }else{
         DieWithError("Use <register|login>");
     }

@@ -8,6 +8,7 @@
 
 #define BUFFER_SIZE 1024
 #define MAX_TIMESTAMP_DIFF 30  // 30 seconds tolerance for timestamp
+#define MAXPENDING 5
 
 void DieWithError(char *errorMessage)
 {
@@ -16,13 +17,22 @@ void DieWithError(char *errorMessage)
 }
 
 
+// TCP Connection client to server message
 typedef struct {
-    enum { login } messageType;    
-    unsigned int  userID; 
-    unsigned int recipientID;         
-    unsigned long timestamp;        
-    unsigned long digitalSig;       
-} LodiClientToLodiServer;
+    enum{login,post,feed,follow,unfollow,logout} messageType;
+    unsigned int userID;
+    unsigned int recipientID;
+    unsigned long timestamp;
+    unsigned long digitalSig;
+    char message[100];
+} PClientToLodiServer;
+
+// TCP connections server to client acks
+typedef struct {
+    enum{ackLogin,ackPost,ackFeed,ackFollow,ackUnfollow,ackLogout} messageType;
+    unsigned int userID;
+    char message[100];
+} LodiServerMessage;
 
 typedef struct {
     enum { ackRegisterKey, responsePublicKey } messageType;
@@ -35,43 +45,20 @@ typedef struct {
     unsigned int userID;
 } TFAServerToLodiServer;
 
-// To Lodi Client
-typedef struct {
-    enum {ackLogin} messageType;
-    unsigned int userID;
-} LodiServerToLodiClient;
-
-// To PKE Server 
+// To PKE Server
 typedef struct {
     enum {registerKey, requestKey} messageType;
-    unsigned int userID;             
-    unsigned int publicKey;            
+    unsigned int userID;
+    unsigned int publicKey;
 } LodiServerToPKEServer;
 
 // To TFA Server (request authentication)
 typedef struct {
     enum {registerTFA, ackRegTFA, ackPushTFA, denyPushTFA, requestAuth} messageType;
-    unsigned int userID; 
+    unsigned int userID;
     unsigned long timestamp;
     unsigned long digitalSig;
 } LodiServerToTFAServer;
-
-// TCP Connection client to server message
-typedef struct {
-    enum{login,post,feed,follow,unfollow,logout} messageType;
-    unsigned int userID;
-    unsigned int recipientID;
-    unsigned long timestamp;
-    unsigned long digitalSig;
-    char message[100];
-} PClientToLodiServer;
-
-//TCP connnections server to client acks
-typedef struct {
-    enum{ackLogin,ackPost,ackFeed,ackFollow,ackUnfollow,ackLogout} messageType;
-    unsigned int userID;
-    char message[100];
-} LodiServerMessage;
 
 // RSA 
 unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
@@ -89,55 +76,55 @@ unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
 }
 
 // Request public Key from PKE
-unsigned int requestPublicKey(int sock, char *pkeServerIP, unsigned short pkeServerPort, 
+unsigned int requestPublicKey(int sock, char *pkeServerIP, unsigned short pkeServerPort,
                               unsigned int userID, unsigned long n) {
     struct sockaddr_in pkeServerAddr;
+    struct sockaddr_in fromAddr;
+    unsigned int fromSize;
     LodiServerToPKEServer request;
-    PKServerToPClientOrLodiServer response;  
-    int recvMsgSize; 
-    
+    PKServerToPClientOrLodiServer response;
+    int recvMsgSize;
+
     printf("\n(LodiServer) Requesting public key for user %u from PKE Server...\n", userID);
-    
+
     // Prepare request message
     request.messageType = requestKey;
     request.userID = userID;
-    request.publicKey = 0; 
-    
+    request.publicKey = 0;
+
     // Configure PKE server address
     memset(&pkeServerAddr, 0, sizeof(pkeServerAddr));
     pkeServerAddr.sin_family = AF_INET;
     pkeServerAddr.sin_addr.s_addr = inet_addr(pkeServerIP);
     pkeServerAddr.sin_port = htons(pkeServerPort);
-    
+
     // Send request to PKE Server
     if (sendto(sock, &request, sizeof(request), 0,
                (struct sockaddr *)&pkeServerAddr, sizeof(pkeServerAddr)) != sizeof(request)) {
         printf("(LodiServer) Error: Failed to send request to PKE Server\n");
         return 0;
     }
-    
+
     printf("(LodiServer) Request sent to PKE Server at %s:%u\n", pkeServerIP, pkeServerPort);
-    
+
     // Receive response from PKE Server
-    struct sockaddr_in fromAddr;
-    unsigned int fromSize = sizeof(fromAddr);
-    
+    fromSize = sizeof(fromAddr);
     if ((recvMsgSize = recvfrom(sock, &response, sizeof(response), 0,
                                 (struct sockaddr *)&fromAddr, &fromSize)) < 0) {
         printf("(LodiServer) Error: Failed to receive response from PKE Server\n");
         return 0;
     }
-    
-    printf("(LodiServer) Received response from %s:%u\n", 
+
+    printf("(LodiServer) Received response from %s:%u\n",
            inet_ntoa(fromAddr.sin_addr), ntohs(fromAddr.sin_port));
-    
+
 
     if (response.messageType == responsePublicKey && response.userID == userID) {
         printf("(LodiServer) Public key received: %u\n", response.publicKey);
         printf("(LodiServer) Verifying digital signature...\n");
         return response.publicKey;
     }
-    
+
     printf("(LodiServer) Error: Invalid response from PKE Server\n");
     return 0;
 }
@@ -195,14 +182,103 @@ int requestTFAAuthentication(int sock, char *tfaServerIP, unsigned short tfaServ
         return 0;
     }
 
-    printf("(LodiServer) Error: Authentication failed for user %u\n", userID);
+    printf("(LodiServer) Error: Invalid response from TFA Server\n");
     return 0;
 }
 
-// Main
+// Skeleton: Handle post message
+void handlePost(PClientToLodiServer *msg, LodiServerMessage *response) {
+    printf("\n(LodiServer) --- HANDLE POST ---\n");
+    printf("(LodiServer) User %u wants to post: \"%s\"\n", msg->userID, msg->message);
+
+    // TODO: Implement post functionality
+    // 1. Check if user is logged in
+    // 2. Verify timestamp and digital signature
+    // 3. Store the post in posts array
+    // 4. Send ackPost response
+
+    response->messageType = ackPost;
+    response->userID = msg->userID;
+    strcpy(response->message, "(Feature not yet implemented)");
+    printf("(LodiServer) Post handler not yet implemented\n");
+}
+
+// Skeleton: Handle follow request
+void handleFollow(PClientToLodiServer *msg, LodiServerMessage *response) {
+    printf("\n(LodiServer) --- HANDLE FOLLOW ---\n");
+    printf("(LodiServer) User %u wants to follow user %u\n", msg->userID, msg->recipientID);
+
+    // TODO: Implement follow functionality
+    // 1. Check if user is logged in
+    // 2. Verify timestamp and digital signature
+    // 3. Add follow relationship to followRelationships array
+    // 4. Send ackFollow response
+
+    response->messageType = ackFollow;
+    response->userID = msg->userID;
+    strcpy(response->message, "(Feature not yet implemented)");
+    printf("(LodiServer) Follow handler not yet implemented\n");
+}
+
+// Skeleton: Handle unfollow request
+void handleUnfollow(PClientToLodiServer *msg, LodiServerMessage *response) {
+    printf("\n(LodiServer) --- HANDLE UNFOLLOW ---\n");
+    printf("(LodiServer) User %u wants to unfollow user %u\n", msg->userID, msg->recipientID);
+
+    // TODO: Implement unfollow functionality
+    // 1. Check if user is logged in
+    // 2. Verify timestamp and digital signature
+    // 3. Remove follow relationship from followRelationships array
+    // 4. Send ackUnfollow response
+
+    response->messageType = ackUnfollow;
+    response->userID = msg->userID;
+    strcpy(response->message, "(Feature not yet implemented)");
+    printf("(LodiServer) Unfollow handler not yet implemented\n");
+}
+
+// Skeleton: Handle feed request
+void handleFeed(PClientToLodiServer *msg, LodiServerMessage *response) {
+    printf("\n(LodiServer) --- HANDLE FEED ---\n");
+    printf("(LodiServer) User %u requesting feed\n", msg->userID);
+
+    // TODO: Implement feed functionality
+    // 1. Check if user is logged in
+    // 2. Verify timestamp and digital signature
+    // 3. Find all users that msg->userID follows
+    // 4. Retrieve posts from those users
+    // 5. Format posts into response.message
+    // 6. Send ackFeed response
+
+    response->messageType = ackFeed;
+    response->userID = msg->userID;
+    strcpy(response->message, "(No posts available - feature not yet implemented)");
+    printf("(LodiServer) Feed handler not yet implemented\n");
+}
+
+// Skeleton: Handle logout request
+void handleLogout(PClientToLodiServer *msg, LodiServerMessage *response) {
+    printf("\n(LodiServer) --- HANDLE LOGOUT ---\n");
+    printf("(LodiServer) User %u logging out\n", msg->userID);
+
+    // TODO: Implement logout functionality
+    // 1. Check if user is logged in
+    // 2. Verify timestamp and digital signature
+    // 3. Remove userID from loggedInUsers array
+    // 4. Send ackLogout response
+
+    response->messageType = ackLogout;
+    response->userID = msg->userID;
+    strcpy(response->message, "Logout successful");
+    printf("(LodiServer) Logout handler not yet implemented\n");
+}
+
 int main(int argc, char *argv[]) {
     int sock;
+    int tcpServSock;
+    int tcpClntSock;
     struct sockaddr_in lodiServerAddr;
+    struct sockaddr_in tcpServerAddr;
     struct sockaddr_in clientAddr;
     unsigned int clientAddrLen;
     unsigned short lodiServerPort;
@@ -210,9 +286,9 @@ int main(int argc, char *argv[]) {
     unsigned short pkeServerPort;
     char *tfaServerIP;
     unsigned short tfaServerPort;
-    LodiClientToLodiServer incomingMsg;  
+    PClientToLodiServer incomingMsg;
     int recvMsgSize;
-    unsigned long n = 533;  
+    unsigned long n = 533;
 
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <IP Address>\n", argv[0]);
@@ -230,65 +306,91 @@ int main(int argc, char *argv[]) {
     printf("(LodiServer) RSA Modulus (n): %lu\n", n);
     printf("\n\n");
     
-    // Socket creation
+    // Socket creation for UDP (used to contact PKE/TFA servers)
     if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
         DieWithError("(LodiServer) socket() failed");
 
-     //TCP socket creation 
-    if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    // TCP socket creation (listen for client connections)
+    if ((tcpServSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
         DieWithError("(LodiServer) TCP socket() failed");
 
+    printf("(LodiServer) Sockets created successfully\n");
 
-
-
-
-        ////implement TCP connection here////
-
-        
-    printf("(LodiServer) Socket created successfully\n");
-
-    // Configure server address
+    // Configure UDP server address (for PKE/TFA communications)
     memset(&lodiServerAddr, 0, sizeof(lodiServerAddr));
     lodiServerAddr.sin_family = AF_INET;
     lodiServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     lodiServerAddr.sin_port = htons(lodiServerPort);
 
-    printf("(LodiServer) Address structure configured\n");
-
-    // Bind
+    // Bind UDP socket
     if (bind(sock, (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) < 0)
         DieWithError("(LodiServer) bind() failed");
 
-    printf("(LodiServer) Socket bound to port %u\n", lodiServerPort);
+    printf("(LodiServer) UDP Socket bound to port %u\n", lodiServerPort);
+
+    // Configure TCP server address (same port)
+    memset(&tcpServerAddr, 0, sizeof(tcpServerAddr));
+    tcpServerAddr.sin_family = AF_INET;
+    tcpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    tcpServerAddr.sin_port = htons(lodiServerPort);
+
+    // Bind TCP listening socket
+    if (bind(tcpServSock, (struct sockaddr *)&tcpServerAddr, sizeof(tcpServerAddr)) < 0)
+        DieWithError("(LodiServer) bind() for TCP failed");
+
+    if (listen(tcpServSock, MAXPENDING) < 0)
+        DieWithError("(LodiServer) listen() failed");
+
+    printf("(LodiServer) TCP Socket listening on port %u\n", lodiServerPort);
     printf("(LodiServer) Lodi Server ready and listening...\n\n");
 
     // loop
     for (;;) {
         clientAddrLen = sizeof(clientAddr);
-        
-        printf("(LodiServer) Waiting for login message...\n");
-        
-        // Receiving message
-        if ((recvMsgSize = recvfrom(sock, &incomingMsg, sizeof(incomingMsg), 0,
-                                    (struct sockaddr *)&clientAddr,
-                                    &clientAddrLen)) < 0)
-            DieWithError("(LodiServer) recvfrom() failed");
+
+        printf("(LodiServer) Waiting for client TCP connection...\n");
+
+        if ((tcpClntSock = accept(tcpServSock, (struct sockaddr *)&clientAddr, &clientAddrLen)) < 0)
+            DieWithError("(LodiServer) accept() failed");
+
+        printf("(LodiServer) TCP connection from %s:%d\n",
+               inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+        // Receive the login struct over TCP (handle partial reads)
+        unsigned int expected = sizeof(incomingMsg);
+        unsigned int totalBytesRcvd = 0;
+        char *recvPtr = (char *)&incomingMsg;
+        while (totalBytesRcvd < expected) {
+            int r = recv(tcpClntSock, recvPtr + totalBytesRcvd, (int)(expected - totalBytesRcvd), 0);
+            if (r < 0) {
+                close(tcpClntSock);
+                DieWithError("(LodiServer) recv() failed");
+            }
+            if (r == 0) break; // connection closed
+            totalBytesRcvd += r;
+        }
+
+        if (totalBytesRcvd < expected) {
+            close(tcpClntSock);
+            printf("(LodiServer) Incomplete login message received (got %u of %u)\n", totalBytesRcvd, expected);
+            continue;
+        }
+
+        recvMsgSize = totalBytesRcvd;
         
         printf("(LodiServer) Received %d bytes from %s:%d\n",
                recvMsgSize,
                inet_ntoa(clientAddr.sin_addr),
                ntohs(clientAddr.sin_port));
-        
-        // Verify it's a login message
-        if (incomingMsg.messageType != login) {
-            printf("(LodiServer) Error: Received non-login message (type=%d)\n", 
-                   incomingMsg.messageType);
-            continue;
-        }
-        
-        printf("(LodiServer) Login request from User ID: %u\n", incomingMsg.userID);
+
+        printf("(LodiServer) Message type: %d from User ID: %u\n",
+               incomingMsg.messageType, incomingMsg.userID);
         printf("(LodiServer) Timestamp: %lu\n", incomingMsg.timestamp);
         printf("(LodiServer) Digital Signature: %lu\n", incomingMsg.digitalSig);
+
+        // Route message based on type
+        if (incomingMsg.messageType == login) {
+            printf("(LodiServer) Processing LOGIN request\n");
         
         // verify timestamp 
         unsigned long currentTime = time(NULL) % 500;
@@ -348,22 +450,85 @@ int main(int argc, char *argv[]) {
         
         printf("\n(LodiServer) All authentication steps passed!\n");
         printf("(LodiServer) Sending ackLogin to client...\n");
-        
-        LodiServerToLodiClient ackMsg;
+
+        LodiServerMessage ackMsg;
         ackMsg.messageType = ackLogin;
         ackMsg.userID = incomingMsg.userID;
+        strcpy(ackMsg.message, "Login successful");
         
-        // Ack Client
-        if (sendto(sock, &ackMsg, sizeof(ackMsg), 0,
-                   (struct sockaddr *)&clientAddr, sizeof(clientAddr)) != sizeof(ackMsg)) {
-            printf("(LodiServer) Error: Failed to send ackLogin\n");
-        } else {
+        // Ack Client over the accepted TCP connection
+        unsigned int ackLen = sizeof(ackMsg);
+        unsigned int sent = 0;
+        char *sendPtr = (char *)&ackMsg;
+        while (sent < ackLen) {
+            int s = send(tcpClntSock, sendPtr + sent, ackLen - sent, 0);
+            if (s <= 0) {
+                printf("(LodiServer) Error: Failed to send ackLogin\n");
+                break;
+            }
+            sent += s;
+        }
+
+        if (sent == ackLen) {
             printf("(LodiServer) ackLogin sent to %s:%d\n",
                    inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
             printf("(LodiServer) User %u successfully authenticated!\n", incomingMsg.userID);
         }
-        
-        
+
+        close(tcpClntSock);
+
+        } else {
+            // Handle non-login messages (post, feed, follow, unfollow, logout)
+            printf("(LodiServer) Processing non-login request\n");
+
+            LodiServerMessage response;
+
+            // Route to appropriate handler based on message type
+            switch (incomingMsg.messageType) {
+                case post:
+                    handlePost(&incomingMsg, &response);
+                    break;
+                case feed:
+                    handleFeed(&incomingMsg, &response);
+                    break;
+                case follow:
+                    handleFollow(&incomingMsg, &response);
+                    break;
+                case unfollow:
+                    handleUnfollow(&incomingMsg, &response);
+                    break;
+                case logout:
+                    handleLogout(&incomingMsg, &response);
+                    break;
+                default:
+                    printf("(LodiServer) Error: Unknown message type %d\n", incomingMsg.messageType);
+                    response.messageType = ackLogin; // Use ackLogin as error response
+                    response.userID = incomingMsg.userID;
+                    strcpy(response.message, "Error: Unknown message type");
+                    break;
+            }
+
+            // Send response back to client
+            unsigned int responseLen = sizeof(response);
+            unsigned int sent = 0;
+            char *sendPtr = (char *)&response;
+            while (sent < responseLen) {
+                int s = send(tcpClntSock, sendPtr + sent, responseLen - sent, 0);
+                if (s <= 0) {
+                    printf("(LodiServer) Error: Failed to send response\n");
+                    break;
+                }
+                sent += s;
+            }
+
+            if (sent == responseLen) {
+                printf("(LodiServer) Response sent to %s:%d\n",
+                       inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+            }
+
+            close(tcpClntSock);
+        }
+
     }
     
     close(sock);
