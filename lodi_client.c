@@ -174,20 +174,55 @@ int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
                unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- POST MESSAGE ---\n");
 
-    // TODO: Implement posting functionality
     // 1. Get message content from user (fgets into char array)
-    // 2. Create timestamp: time(NULL) % 500
-    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
-    // 4. Fill PClientToLodiServer struct:
-    //    - messageType = post
-    //    - userID, recipientID = 0, timestamp, digitalSig
-    //    - Copy message content into message field
-    // 5. Call sendRequestToServer()
-    // 6. Check response.messageType == ackPost
-    // 7. Display success message
+    char messageContent[100];
+    printf("Enter your message (max 99 characters): ");
+    if (fgets(messageContent, sizeof(messageContent), stdin) == NULL) {
+        printf("Error reading message\n");
+        return 0;
+    }
 
-    printf("(Feature not yet implemented)\n");
-    return 0;
+    // Remove trailing newline if present
+    size_t len = strlen(messageContent);
+    if (len > 0 && messageContent[len - 1] == '\n') {
+        messageContent[len - 1] = '\0';
+    }
+
+    // 2. Create timestamp: time(NULL) % 500
+    unsigned long timestamp = (unsigned long)time(NULL) % 500;
+
+    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
+
+    // 4. Fill PClientToLodiServer struct
+    PClientToLodiServer request;
+    request.messageType = post;
+    request.userID = userID;
+    request.recipientID = 0;
+    request.timestamp = timestamp;
+    request.digitalSig = digitalSig;
+    strncpy(request.message, messageContent, sizeof(request.message) - 1);
+    request.message[sizeof(request.message) - 1] = '\0'; // Ensure null termination
+
+    // 5. Call sendRequestToServer()
+    LodiServerMessage response;
+    if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
+        printf("Failed to send post to server\n");
+        return 0;
+    }
+
+    // 6. Check response.messageType == ackPost
+    if (response.messageType == ackPost) {
+        // 7. Display success message
+        printf("\n*** MESSAGE POSTED SUCCESSFULLY ***\n");
+        printf("Your message: \"%s\"\n", messageContent);
+        printf("Server response: %s\n", response.message);
+        return 1;
+    } else {
+        printf("Error: Unexpected response from server\n");
+        printf("Server message: %s\n", response.message);
+        return 0;
+    }
 }
 
 // Skeleton: View feed (get posts from followed idols)

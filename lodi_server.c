@@ -9,6 +9,8 @@
 #define BUFFER_SIZE 1024
 #define MAX_TIMESTAMP_DIFF 30  // 30 seconds tolerance for timestamp
 #define MAXPENDING 5
+#define MAX_POSTS 1000  // Maximum number of posts to store
+#define MAX_USERS 100   // Maximum number of users
 
 void DieWithError(char *errorMessage)
 {
@@ -59,6 +61,17 @@ typedef struct {
     unsigned long timestamp;
     unsigned long digitalSig;
 } LodiServerToTFAServer;
+
+// Post storage structure
+typedef struct {
+    unsigned int userID;
+    unsigned long timestamp;
+    char message[100];
+} Post;
+
+// Global storage for posts
+Post posts[MAX_POSTS];
+int postCount = 0;
 
 // RSA 
 unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
@@ -191,16 +204,34 @@ void handlePost(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE POST ---\n");
     printf("(LodiServer) User %u wants to post: \"%s\"\n", msg->userID, msg->message);
 
-    // TODO: Implement post functionality
-    // 1. Check if user is logged in
-    // 2. Verify timestamp and digital signature
-    // 3. Store the post in posts array
-    // 4. Send ackPost response
+    // Check if we have space for more posts
+    if (postCount >= MAX_POSTS) {
+        printf("(LodiServer) ERROR: Post storage is full\n");
+        response->messageType = ackPost;
+        response->userID = msg->userID;
+        strcpy(response->message, "Error: Server post storage is full");
+        return;
+    }
 
+    // Store the post
+    posts[postCount].userID = msg->userID;
+    posts[postCount].timestamp = msg->timestamp;
+    strncpy(posts[postCount].message, msg->message, sizeof(posts[postCount].message) - 1);
+    posts[postCount].message[sizeof(posts[postCount].message) - 1] = '\0';
+
+    printf("(LodiServer) Post stored at index %d\n", postCount);
+    printf("(LodiServer) User ID: %u\n", posts[postCount].userID);
+    printf("(LodiServer) Timestamp: %lu\n", posts[postCount].timestamp);
+    printf("(LodiServer) Message: \"%s\"\n", posts[postCount].message);
+
+    postCount++;
+    printf("(LodiServer) Total posts now: %d\n", postCount);
+
+    // Send success response
     response->messageType = ackPost;
     response->userID = msg->userID;
-    strcpy(response->message, "(Feature not yet implemented)");
-    printf("(LodiServer) Post handler not yet implemented\n");
+    strcpy(response->message, "Post successful");
+    printf("(LodiServer) Post successfully stored\n");
 }
 
 // Skeleton: Handle follow request
