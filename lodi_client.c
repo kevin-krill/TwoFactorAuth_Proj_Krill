@@ -250,20 +250,56 @@ int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
                  unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- FOLLOW IDOL ---\n");
 
-    // TODO: Implement follow functionality
     // 1. Get idol's userID from user input (scanf)
-    // 2. Create timestamp: time(NULL) % 500
-    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
-    // 4. Fill PClientToLodiServer struct:
-    //    - messageType = follow
-    //    - userID, recipientID = idol's userID, timestamp, digitalSig
-    //    - message field empty
-    // 5. Call sendRequestToServer()
-    // 6. Check response.messageType == ackFollow
-    // 7. Display success message
+    unsigned int idolID;
+    printf("Enter the User ID of the idol you want to follow: ");
+    if (scanf("%u", &idolID) != 1) {
+        while(getchar() != '\n'); // Clear input buffer
+        printf("Error: Invalid user ID\n");
+        return 0;
+    }
+    while(getchar() != '\n'); // Clear remaining input
 
-    printf("(Feature not yet implemented)\n");
-    return 0;
+    // Check if trying to follow themselves
+    if (idolID == userID) {
+        printf("Error: You cannot follow yourself\n");
+        return 0;
+    }
+
+    // 2. Create timestamp: time(NULL) % 500
+    unsigned long timestamp = (unsigned long)time(NULL) % 500;
+
+    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
+
+    // 4. Fill PClientToLodiServer struct
+    PClientToLodiServer request;
+    request.messageType = follow;
+    request.userID = userID;
+    request.recipientID = idolID;
+    request.timestamp = timestamp;
+    request.digitalSig = digitalSig;
+    memset(request.message, 0, sizeof(request.message)); // Empty message field
+
+    // 5. Call sendRequestToServer()
+    LodiServerMessage response;
+    if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
+        printf("Failed to send follow request to server\n");
+        return 0;
+    }
+
+    // 6. Check response.messageType == ackFollow
+    if (response.messageType == ackFollow) {
+        // 7. Display success message
+        printf("\n*** FOLLOW SUCCESSFUL ***\n");
+        printf("You are now following User ID: %u\n", idolID);
+        printf("Server response: %s\n", response.message);
+        return 1;
+    } else {
+        printf("Error: Unexpected response from server\n");
+        printf("Server message: %s\n", response.message);
+        return 0;
+    }
 }
 
 // Skeleton: Unfollow an idol

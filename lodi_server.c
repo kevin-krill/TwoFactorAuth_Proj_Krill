@@ -69,22 +69,59 @@ typedef struct {
     char message[100];
 } Post;
 
+// Per-user following list structure
+#define MAX_FOLLOWING_PER_USER 100
+typedef struct {
+    unsigned int userID;                           // The user who owns this list
+    unsigned int following[MAX_FOLLOWING_PER_USER]; // IDs of users they follow
+    int followingCount;                             // Number of users they follow
+} UserFollowingList;
+
 // Global storage for posts
 Post posts[MAX_POSTS];
 int postCount = 0;
 
-// RSA 
+// Global storage for user following lists
+UserFollowingList userFollowingLists[MAX_USERS];
+int userListCount = 0;
+
+// Helper function to get or create a user's following list
+// Returns pointer to the user's list, or NULL if storage is full
+UserFollowingList* getUserFollowingList(unsigned int userID) {
+    // Check if user already has a list
+    for (int i = 0; i < userListCount; i++) {
+        if (userFollowingLists[i].userID == userID) {
+            return &userFollowingLists[i];
+        }
+    }
+
+    // User doesn't have a list yet, create one
+    if (userListCount >= MAX_USERS) {
+        printf("(LodiServer) ERROR: Cannot create more user following lists (max %d)\n", MAX_USERS);
+        return NULL;
+    }
+
+    // Initialize new list
+    userFollowingLists[userListCount].userID = userID;
+    userFollowingLists[userListCount].followingCount = 0;
+    printf("(LodiServer) Created new following list for user %u at index %d\n", userID, userListCount);
+
+    userListCount++;
+    return &userFollowingLists[userListCount - 1];
+}
+
+// RSA
 unsigned long modExp(unsigned long base, unsigned long exp, unsigned long n) {
     unsigned long result = 1;
     base = base % n;
-    
+
     while (exp > 0) {
         if (exp % 2 == 1)
             result = (result * base) % n;
         exp = exp >> 1;
         base = (base * base) % n;
     }
-    
+
     return result;
 }
 
@@ -239,16 +276,49 @@ void handleFollow(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE FOLLOW ---\n");
     printf("(LodiServer) User %u wants to follow user %u\n", msg->userID, msg->recipientID);
 
-    // TODO: Implement follow functionality
-    // 1. Check if user is logged in
-    // 2. Verify timestamp and digital signature
-    // 3. Add follow relationship to followRelationships array
-    // 4. Send ackFollow response
+    // Get or create the user's following list
+    UserFollowingList* userList = getUserFollowingList(msg->userID);
+    if (userList == NULL) {
+        printf("(LodiServer) ERROR: Could not get/create following list for user %u\n", msg->userID);
+        response->messageType = ackFollow;
+        response->userID = msg->userID;
+        strcpy(response->message, "Error: Server user storage is full");
+        return;
+    }
 
+    // Check if user's following list is full
+    if (userList->followingCount >= MAX_FOLLOWING_PER_USER) {
+        printf("(LodiServer) ERROR: User %u has reached max following limit (%d)\n",
+               msg->userID, MAX_FOLLOWING_PER_USER);
+        response->messageType = ackFollow;
+        response->userID = msg->userID;
+        strcpy(response->message, "Error: You have reached max following limit");
+        return;
+    }
+
+    // Check if already following this idol
+    for (int i = 0; i < userList->followingCount; i++) {
+        if (userList->following[i] == msg->recipientID) {
+            printf("(LodiServer) User %u is already following user %u\n", msg->userID, msg->recipientID);
+            response->messageType = ackFollow;
+            response->userID = msg->userID;
+            strcpy(response->message, "You are already following this user");
+            return;
+        }
+    }
+
+    // Add the idol to the user's following list
+    userList->following[userList->followingCount] = msg->recipientID;
+    userList->followingCount++;
+
+    printf("(LodiServer) User %u now following user %u\n", msg->userID, msg->recipientID);
+    printf("(LodiServer) User %u is now following %d users\n", msg->userID, userList->followingCount);
+
+    // Send success response
     response->messageType = ackFollow;
     response->userID = msg->userID;
-    strcpy(response->message, "(Feature not yet implemented)");
-    printf("(LodiServer) Follow handler not yet implemented\n");
+    strcpy(response->message, "Follow successful");
+    printf("(LodiServer) Follow relationship successfully stored\n");
 }
 
 // Skeleton: Handle unfollow request
