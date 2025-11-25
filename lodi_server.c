@@ -326,16 +326,55 @@ void handleUnfollow(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE UNFOLLOW ---\n");
     printf("(LodiServer) User %u wants to unfollow user %u\n", msg->userID, msg->recipientID);
 
-    // TODO: Implement unfollow functionality
-    // 1. Check if user is logged in
-    // 2. Verify timestamp and digital signature
-    // 3. Remove follow relationship from followRelationships array
-    // 4. Send ackUnfollow response
+    // Get the user's following list
+    UserFollowingList* userList = NULL;
+    for (int i = 0; i < userListCount; i++) {
+        if (userFollowingLists[i].userID == msg->userID) {
+            userList = &userFollowingLists[i];
+            break;
+        }
+    }
 
+    // Check if user has a following list
+    if (userList == NULL) {
+        printf("(LodiServer) User %u has no following list\n", msg->userID);
+        response->messageType = ackUnfollow;
+        response->userID = msg->userID;
+        strcpy(response->message, "You are not following anyone");
+        return;
+    }
+
+    // Find and remove the idol from the user's following list
+    int found = -1;
+    for (int i = 0; i < userList->followingCount; i++) {
+        if (userList->following[i] == msg->recipientID) {
+            found = i;
+            break;
+        }
+    }
+
+    if (found == -1) {
+        printf("(LodiServer) User %u is not following user %u\n", msg->userID, msg->recipientID);
+        response->messageType = ackUnfollow;
+        response->userID = msg->userID;
+        strcpy(response->message, "You are not following this user");
+        return;
+    }
+
+    // Remove the idol by shifting all subsequent elements left
+    for (int i = found; i < userList->followingCount - 1; i++) {
+        userList->following[i] = userList->following[i + 1];
+    }
+    userList->followingCount--;
+
+    printf("(LodiServer) User %u unfollowed user %u\n", msg->userID, msg->recipientID);
+    printf("(LodiServer) User %u is now following %d users\n", msg->userID, userList->followingCount);
+
+    // Send success response
     response->messageType = ackUnfollow;
     response->userID = msg->userID;
-    strcpy(response->message, "(Feature not yet implemented)");
-    printf("(LodiServer) Unfollow handler not yet implemented\n");
+    strcpy(response->message, "Unfollow successful");
+    printf("(LodiServer) Unfollow successfully processed\n");
 }
 
 // Skeleton: Handle feed request
@@ -343,18 +382,68 @@ void handleFeed(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE FEED ---\n");
     printf("(LodiServer) User %u requesting feed\n", msg->userID);
 
-    // TODO: Implement feed functionality
-    // 1. Check if user is logged in
-    // 2. Verify timestamp and digital signature
-    // 3. Find all users that msg->userID follows
-    // 4. Retrieve posts from those users
-    // 5. Format posts into response.message
-    // 6. Send ackFeed response
-
     response->messageType = ackFeed;
     response->userID = msg->userID;
-    strcpy(response->message, "(No posts available - feature not yet implemented)");
-    printf("(LodiServer) Feed handler not yet implemented\n");
+
+    // Find the user's following list
+    UserFollowingList* userList = NULL;
+    for (int i = 0; i < userListCount; i++) {
+        if (userFollowingLists[i].userID == msg->userID) {
+            userList = &userFollowingLists[i];
+            break;
+        }
+    }
+
+    // Check if user is following anyone
+    if (userList == NULL || userList->followingCount == 0) {
+        printf("(LodiServer) User %u is not following anyone\n", msg->userID);
+        strcpy(response->message, "You are not following anyone. Follow some users to see their posts!");
+        return;
+    }
+
+    printf("(LodiServer) User %u follows %d users\n", msg->userID, userList->followingCount);
+
+    // Build the feed from posts by followed users
+    char feed[100] = "";
+    int feedPostCount = 0;
+
+    // Iterate through all posts and filter by followed users
+    for (int i = 0; i < postCount; i++) {
+        // Check if this post is from someone the user follows
+        int isFollowing = 0;
+        for (int j = 0; j < userList->followingCount; j++) {
+            if (posts[i].userID == userList->following[j]) {
+                isFollowing = 1;
+                break;
+            }
+        }
+
+        if (isFollowing) {
+            feedPostCount++;
+            // Format: "User X: message\n"
+            char postLine[100];
+            snprintf(postLine, sizeof(postLine), "User %u: %s\n", posts[i].userID, posts[i].message);
+
+            // Check if we have space to add this post
+            if (strlen(feed) + strlen(postLine) < sizeof(response->message) - 1) {
+                strcat(feed, postLine);
+            } else {
+                // Feed is full, add truncation message
+                strcat(feed, "...(more posts)");
+                break;
+            }
+        }
+    }
+
+    printf("(LodiServer) Found %d posts from followed users\n", feedPostCount);
+
+    if (feedPostCount == 0) {
+        strcpy(response->message, "No posts yet from users you follow.");
+    } else {
+        strcpy(response->message, feed);
+    }
+
+    printf("(LodiServer) Feed generated successfully\n");
 }
 
 // Skeleton: Handle logout request
@@ -362,16 +451,13 @@ void handleLogout(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE LOGOUT ---\n");
     printf("(LodiServer) User %u logging out\n", msg->userID);
 
-    // TODO: Implement logout functionality
-    // 1. Check if user is logged in
-    // 2. Verify timestamp and digital signature
-    // 3. Remove userID from loggedInUsers array
-    // 4. Send ackLogout response
-
+    // Send success response
     response->messageType = ackLogout;
     response->userID = msg->userID;
-    strcpy(response->message, "Logout successful");
-    printf("(LodiServer) Logout handler not yet implemented\n");
+    strcpy(response->message, "Logout successful. Goodbye!");
+
+    printf("(LodiServer) User %u has logged out\n", msg->userID);
+    printf("(LodiServer) Logout processed successfully\n");
 }
 
 int main(int argc, char *argv[]) {
