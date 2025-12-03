@@ -153,7 +153,7 @@ void displayMenu() {
     printf("2. View feed (posts from idols)\n");
     printf("3. Follow an idol\n");
     printf("4. Unfollow an idol\n");
-    printf("5. Logout\n");
+    printf("5. Logout / Quit\n");
     printf("======================================\n");
     printf("Enter your choice (1-5): ");
 }
