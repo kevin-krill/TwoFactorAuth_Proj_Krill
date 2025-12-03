@@ -169,12 +169,12 @@ int getSessionChoice() {
     return choice;
 }
 
-// Skeleton: Post a message
+// Post a message
 int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
                unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- POST MESSAGE ---\n");
 
-    // 1. Get message content from user (fgets into char array)
+    // Get message content from user (fgets into char array)
     char messageContent[100];
     printf("Enter your message (max 99 characters): ");
     if (fgets(messageContent, sizeof(messageContent), stdin) == NULL) {
@@ -188,13 +188,13 @@ int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
         messageContent[len - 1] = '\0';
     }
 
-    // 2. Create timestamp: time(NULL) % 500
+    // Create timestamp: time(NULL) % 500
     unsigned long timestamp = (unsigned long)time(NULL) % 500;
 
-    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // Create digital signature: createDigitalSignature(timestamp, d, n)
     unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
 
-    // 4. Fill PClientToLodiServer struct
+    // Fill PClientToLodiServer struct
     PClientToLodiServer request;
     request.messageType = post;
     request.userID = userID;
@@ -204,16 +204,17 @@ int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
     strncpy(request.message, messageContent, sizeof(request.message) - 1);
     request.message[sizeof(request.message) - 1] = '\0'; // Ensure null termination
 
-    // 5. Call sendRequestToServer()
+    // Call sendRequestToServer()
+    printf("(LodiClient) Sending POST request to server...\n");
     LodiServerMessage response;
     if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
         printf("Failed to send post to server\n");
         return 0;
     }
 
-    // 6. Check response.messageType == ackPost
+    // Check response.messageType == ackPost
     if (response.messageType == ackPost) {
-        // 7. Display success message
+        // Display success message
         printf("\n*** MESSAGE POSTED SUCCESSFULLY ***\n");
         printf("Your message: \"%s\"\n", messageContent);
         printf("Server response: %s\n", response.message);
@@ -225,18 +226,40 @@ int handlePost(char *lodiServerIP, unsigned short lodiServerPort,
     }
 }
 
-// Skeleton: View feed (get posts from followed idols)
+// View feed (get posts from followed idols) - receives multiple messages
 int handleFeed(char *lodiServerIP, unsigned short lodiServerPort,
                unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- VIEW FEED ---\n");
 
-    // 1. Create timestamp: time(NULL) % 500
+    int tcpSock;
+    struct sockaddr_in lodiServerAddr;
+
+    // Create TCP socket
+    if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        printf("(LodiClient) Error: Failed to create TCP socket\n");
+        return 0;
+    }
+
+    // Configure server address
+    memset(&lodiServerAddr, 0, sizeof(lodiServerAddr));
+    lodiServerAddr.sin_family = AF_INET;
+    lodiServerAddr.sin_addr.s_addr = inet_addr(lodiServerIP);
+    lodiServerAddr.sin_port = htons(lodiServerPort);
+
+    // Connect to server
+    if (connect(tcpSock, (struct sockaddr *)&lodiServerAddr, sizeof(lodiServerAddr)) < 0) {
+        printf("(LodiClient) Error: Failed to connect to server\n");
+        close(tcpSock);
+        return 0;
+    }
+
+    // Create timestamp: time(NULL) % 500
     unsigned long timestamp = (unsigned long)time(NULL) % 500;
 
-    // 2. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // Create digital signature: createDigitalSignature(timestamp, d, n)
     unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
 
-    // 3. Fill PClientToLodiServer struct
+    // Fill PClientToLodiServer struct
     PClientToLodiServer request;
     request.messageType = feed;
     request.userID = userID;
@@ -245,32 +268,89 @@ int handleFeed(char *lodiServerIP, unsigned short lodiServerPort,
     request.digitalSig = digitalSig;
     memset(request.message, 0, sizeof(request.message)); // Empty message field
 
-    // 4. Call sendRequestToServer()
-    LodiServerMessage response;
-    if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
-        printf("Failed to send feed request to server\n");
-        return 0;
+    // Send request (ensure all bytes sent)
+    printf("(LodiClient) Sending FEED request to server...\n");
+    unsigned int requestLen = sizeof(PClientToLodiServer);
+    unsigned int sent = 0;
+    while (sent < requestLen) {
+        int s = send(tcpSock, ((char *)&request) + sent, requestLen - sent, 0);
+        if (s <= 0) {
+            printf("(LodiClient) Error: Failed to send request\n");
+            close(tcpSock);
+            return 0;
+        }
+        sent += s;
     }
 
-    // 5. Check response.messageType == ackFeed
-    if (response.messageType == ackFeed) {
-        // 6. Display posts from response.message field
-        printf("\n*** YOUR FEED ***\n");
+    // Set receive timeout
+    struct timeval tv = {10, 0};
+    setsockopt(tcpSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    printf("\n*** YOUR FEED ***\n");
+    int postCount = 0;
+
+    // Loop to receive multiple posts until END_OF_FEED signal
+    while (1) {
+        LodiServerMessage response;
+        char buffer[BUFFER_SIZE];
+
+        // Receive response 
+        unsigned int expected = sizeof(LodiServerMessage);
+        unsigned int totalBytesRcvd = 0;
+        while (totalBytesRcvd < expected) {
+            int r = recv(tcpSock, buffer + totalBytesRcvd, (int)(expected - totalBytesRcvd), 0);
+            if (r < 0) {
+                printf("(LodiClient) Error: Failed to receive response\n");
+                close(tcpSock);
+                return 0;
+            }
+            if (r == 0) break; // Connection closed
+            totalBytesRcvd += r;
+        }
+
+        if (totalBytesRcvd < expected) {
+            printf("(LodiClient) Error: Incomplete response from server\n");
+            close(tcpSock);
+            return 0;
+        }
+
+        // Copy response
+        memcpy(&response, buffer, sizeof(LodiServerMessage));
+
+        // Check if this is the end signal
+        if (strcmp(response.message, "END_OF_FEED") == 0) {
+            break;
+        }
+
+        // Check response type
+        if (response.messageType != ackFeed) {
+            printf("Error: Unexpected response from server\n");
+            close(tcpSock);
+            return 0;
+        }
+
+        // Display this post
         printf("%s\n", response.message);
-        return 1;
-    } else {
-        printf("Error: Unexpected response from server\n");
-        printf("Server message: %s\n", response.message);
-        return 0;
+        postCount++;
     }
+
+    close(tcpSock);
+
+    if (postCount == 0) {
+        printf("No posts to display. Follow some users to see their posts!\n");
+    } else {
+        printf("\n--- End of feed (%d posts) ---\n", postCount);
+    }
+
+    return 1;
 }
 
-// Skeleton: Follow an idol
+// Follow an idol
 int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
                  unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- FOLLOW IDOL ---\n");
 
-    // 1. Get idol's userID from user input (scanf)
+    // Get idol's userID from user input (scanf)
     unsigned int idolID;
     printf("Enter the User ID of the idol you want to follow: ");
     if (scanf("%u", &idolID) != 1) {
@@ -286,13 +366,13 @@ int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
         return 0;
     }
 
-    // 2. Create timestamp: time(NULL) % 500
+    // Create timestamp: time(NULL) % 500
     unsigned long timestamp = (unsigned long)time(NULL) % 500;
 
-    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // Create digital signature: createDigitalSignature(timestamp, d, n)
     unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
 
-    // 4. Fill PClientToLodiServer struct
+    // Fill PClientToLodiServer struct
     PClientToLodiServer request;
     request.messageType = follow;
     request.userID = userID;
@@ -301,16 +381,17 @@ int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
     request.digitalSig = digitalSig;
     memset(request.message, 0, sizeof(request.message)); // Empty message field
 
-    // 5. Call sendRequestToServer()
+    // Call sendRequestToServer()
+    printf("(LodiClient) Sending FOLLOW request to server...\n");
     LodiServerMessage response;
     if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
         printf("Failed to send follow request to server\n");
         return 0;
     }
 
-    // 6. Check response.messageType == ackFollow
+    // Check response.messageType == ackFollow
     if (response.messageType == ackFollow) {
-        // 7. Display success message
+        // Display success message
         printf("\n*** FOLLOW SUCCESSFUL ***\n");
         printf("You are now following User ID: %u\n", idolID);
         printf("Server response: %s\n", response.message);
@@ -322,12 +403,12 @@ int handleFollow(char *lodiServerIP, unsigned short lodiServerPort,
     }
 }
 
-// Skeleton: Unfollow an idol
+// Unfollow an idol
 int handleUnfollow(char *lodiServerIP, unsigned short lodiServerPort,
                    unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- UNFOLLOW IDOL ---\n");
 
-    // 1. Get idol's userID from user input (scanf)
+    // Get idol's userID from user input (scanf)
     unsigned int idolID;
     printf("Enter the User ID of the idol you want to unfollow: ");
     if (scanf("%u", &idolID) != 1) {
@@ -343,13 +424,13 @@ int handleUnfollow(char *lodiServerIP, unsigned short lodiServerPort,
         return 0;
     }
 
-    // 2. Create timestamp: time(NULL) % 500
+    // Create timestamp: time(NULL) % 500
     unsigned long timestamp = (unsigned long)time(NULL) % 500;
 
-    // 3. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // Create digital signature: createDigitalSignature(timestamp, d, n)
     unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
 
-    // 4. Fill PClientToLodiServer struct
+    // Fill PClientToLodiServer struct
     PClientToLodiServer request;
     request.messageType = unfollow;
     request.userID = userID;
@@ -358,16 +439,17 @@ int handleUnfollow(char *lodiServerIP, unsigned short lodiServerPort,
     request.digitalSig = digitalSig;
     memset(request.message, 0, sizeof(request.message)); // Empty message field
 
-    // 5. Call sendRequestToServer()
+    // Call sendRequestToServer()
+    printf("(LodiClient) Sending UNFOLLOW request to server...\n");
     LodiServerMessage response;
     if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
         printf("Failed to send unfollow request to server\n");
         return 0;
     }
 
-    // 6. Check response.messageType == ackUnfollow
+    // Check response.messageType == ackUnfollow
     if (response.messageType == ackUnfollow) {
-        // 7. Display success message
+        // Display success message
         printf("\n*** UNFOLLOW SUCCESSFUL ***\n");
         printf("You have unfollowed User ID: %u\n", idolID);
         printf("Server response: %s\n", response.message);
@@ -379,18 +461,18 @@ int handleUnfollow(char *lodiServerIP, unsigned short lodiServerPort,
     }
 }
 
-// Skeleton: Logout
+// Logout
 int handleLogout(char *lodiServerIP, unsigned short lodiServerPort,
                  unsigned int userID, unsigned long d, unsigned long n) {
     printf("\n--- LOGOUT ---\n");
 
-    // 1. Create timestamp: time(NULL) % 500
+    // Create timestamp: time(NULL) % 500
     unsigned long timestamp = (unsigned long)time(NULL) % 500;
 
-    // 2. Create digital signature: createDigitalSignature(timestamp, d, n)
+    // Create digital signature: createDigitalSignature(timestamp, d, n)
     unsigned long digitalSig = createDigitalSignature(timestamp, d, n);
 
-    // 3. Fill PClientToLodiServer struct
+    // Fill PClientToLodiServer struct
     PClientToLodiServer request;
     request.messageType = logout;
     request.userID = userID;
@@ -399,16 +481,17 @@ int handleLogout(char *lodiServerIP, unsigned short lodiServerPort,
     request.digitalSig = digitalSig;
     memset(request.message, 0, sizeof(request.message)); // Empty message field
 
-    // 4. Call sendRequestToServer()
+    // Call sendRequestToServer()
+    printf("(LodiClient) Sending LOGOUT request to server...\n");
     LodiServerMessage response;
     if (!sendRequestToServer(lodiServerIP, lodiServerPort, &request, &response)) {
         printf("Failed to send logout request to server\n");
         return 1; // Still logout locally even if server communication fails
     }
 
-    // 5. Check response.messageType == ackLogout
+    // Check response.messageType == ackLogout
     if (response.messageType == ackLogout) {
-        // 6. Display logout confirmation
+        // Display logout confirmation
         printf("\n*** LOGOUT SUCCESSFUL ***\n");
         printf("Server response: %s\n", response.message);
         printf("Goodbye!\n");

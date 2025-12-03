@@ -377,13 +377,14 @@ void handleUnfollow(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("(LodiServer) Unfollow successfully processed\n");
 }
 
-// Skeleton: Handle feed request
-void handleFeed(PClientToLodiServer *msg, LodiServerMessage *response) {
+// Handle feed request - sends multiple messages
+int handleFeedMultiple(PClientToLodiServer *msg, int clientSocket, struct sockaddr_in *clientAddr) {
     printf("\n(LodiServer) --- HANDLE FEED ---\n");
     printf("(LodiServer) User %u requesting feed\n", msg->userID);
 
-    response->messageType = ackFeed;
-    response->userID = msg->userID;
+    LodiServerMessage response;
+    response.messageType = ackFeed;
+    response.userID = msg->userID;
 
     // Find the user's following list
     UserFollowingList* userList = NULL;
@@ -397,17 +398,24 @@ void handleFeed(PClientToLodiServer *msg, LodiServerMessage *response) {
     // Check if user is following anyone
     if (userList == NULL || userList->followingCount == 0) {
         printf("(LodiServer) User %u is not following anyone\n", msg->userID);
-        strcpy(response->message, "You are not following anyone. Follow some users to see their posts!");
-        return;
+        strcpy(response.message, "END_OF_FEED");
+
+        // Send the end signal
+        unsigned int responseLen = sizeof(response);
+        unsigned int sent = 0;
+        while (sent < responseLen) {
+            int s = send(clientSocket, ((char *)&response) + sent, responseLen - sent, 0);
+            if (s <= 0) return 0;
+            sent += s;
+        }
+        return 1;
     }
 
     printf("(LodiServer) User %u follows %d users\n", msg->userID, userList->followingCount);
 
-    // Build the feed from posts by followed users
-    char feed[100] = "";
     int feedPostCount = 0;
 
-    // Iterate through all posts and filter by followed users
+    // Iterate through all posts and send each one that matches
     for (int i = 0; i < postCount; i++) {
         // Check if this post is from someone the user follows
         int isFollowing = 0;
@@ -420,30 +428,44 @@ void handleFeed(PClientToLodiServer *msg, LodiServerMessage *response) {
 
         if (isFollowing) {
             feedPostCount++;
-            // Format: "User X: message\n"
-            char postLine[100];
-            snprintf(postLine, sizeof(postLine), "User %u: %s\n", posts[i].userID, posts[i].message);
 
-            // Check if we have space to add this post
-            if (strlen(feed) + strlen(postLine) < sizeof(response->message) - 1) {
-                strcat(feed, postLine);
-            } else {
-                // Feed is full, add truncation message
-                strcat(feed, "...(more posts)");
-                break;
+            // Format the post message
+            snprintf(response.message, sizeof(response.message),
+                    "User %u: %s", posts[i].userID, posts[i].message);
+
+            printf("(LodiServer) Sending post %d: %s\n", feedPostCount, response.message);
+
+            // Send this post
+            unsigned int responseLen = sizeof(response);
+            unsigned int sent = 0;
+            while (sent < responseLen) {
+                int s = send(clientSocket, ((char *)&response) + sent, responseLen - sent, 0);
+                if (s <= 0) {
+                    printf("(LodiServer) Error sending post\n");
+                    return 0;
+                }
+                sent += s;
             }
         }
     }
 
     printf("(LodiServer) Found %d posts from followed users\n", feedPostCount);
 
-    if (feedPostCount == 0) {
-        strcpy(response->message, "No posts yet from users you follow.");
-    } else {
-        strcpy(response->message, feed);
+    // Send end-of-feed signal
+    strcpy(response.message, "END_OF_FEED");
+    unsigned int responseLen = sizeof(response);
+    unsigned int sent = 0;
+    while (sent < responseLen) {
+        int s = send(clientSocket, ((char *)&response) + sent, responseLen - sent, 0);
+        if (s <= 0) {
+            printf("(LodiServer) Error sending end signal\n");
+            return 0;
+        }
+        sent += s;
     }
 
-    printf("(LodiServer) Feed generated successfully\n");
+    printf("(LodiServer) Feed sent successfully (%d posts)\n", feedPostCount);
+    return 1;
 }
 
 // Skeleton: Handle logout request
@@ -578,24 +600,24 @@ int main(int argc, char *argv[]) {
         // Route message based on type
         if (incomingMsg.messageType == login) {
             printf("(LodiServer) Processing LOGIN request\n");
-        
-        // verify timestamp 
+
+        // verify timestamp
         unsigned long currentTime = time(NULL) % 500;
         long timeDiff = (long)(currentTime - incomingMsg.timestamp);
-        
-        printf("\n(LodiServer) Step 1: Verifying timestamp...\n");
+
+        printf("\n(LodiServer) Verifying timestamp...\n");
         printf("(LodiServer) Current time: %lu\n", currentTime);
         printf("(LodiServer) Time difference: %ld seconds\n", timeDiff);
-        
+
         if (abs(timeDiff) > MAX_TIMESTAMP_DIFF) {
             printf("(LodiServer) FAILED: Timestamp too old or invalid\n");
             printf("[Auth] Rejecting login from user %u\n\n", incomingMsg.userID);
             continue;
         }
         printf("(LodiServer) SUCCESS: Timestamp is valid\n");
-        
+
         // Verify using PKE Server
-        printf("\n(LodiServer) Step 2: Verifying digital signature...\n");
+        printf("\n(LodiServer) Verifying digital signature...\n");
         
         unsigned int publicKey = requestPublicKey(sock, pkeServerIP, pkeServerPort, 
                                                   incomingMsg.userID, n);
@@ -621,7 +643,7 @@ int main(int argc, char *argv[]) {
         printf("(LodiServer) SUCCESS: Digital signature verified\n");
 
         // Require TFA
-        printf("(LodiServer) Step 3: Requesting Two-Factor Authentication\n");
+        printf("(LodiServer) Requesting Two-Factor Authentication\n");
         int tfa_ok = requestTFAAuthentication(
             sock,
             tfaServerIP,
@@ -668,52 +690,56 @@ int main(int argc, char *argv[]) {
             // Handle non-login messages (post, feed, follow, unfollow, logout)
             printf("(LodiServer) Processing non-login request\n");
 
-            LodiServerMessage response;
+            // Special handling for feed - it sends multiple responses
+            if (incomingMsg.messageType == feed) {
+                handleFeedMultiple(&incomingMsg, tcpClntSock, &clientAddr);
+                close(tcpClntSock);
+            } else {
+                // Handle other message types normally (single response)
+                LodiServerMessage response;
 
-            // Route to appropriate handler based on message type
-            switch (incomingMsg.messageType) {
-                case post:
-                    handlePost(&incomingMsg, &response);
-                    break;
-                case feed:
-                    handleFeed(&incomingMsg, &response);
-                    break;
-                case follow:
-                    handleFollow(&incomingMsg, &response);
-                    break;
-                case unfollow:
-                    handleUnfollow(&incomingMsg, &response);
-                    break;
-                case logout:
-                    handleLogout(&incomingMsg, &response);
-                    break;
-                default:
-                    printf("(LodiServer) Error: Unknown message type %d\n", incomingMsg.messageType);
-                    response.messageType = ackLogin; // Use ackLogin as error response
-                    response.userID = incomingMsg.userID;
-                    strcpy(response.message, "Error: Unknown message type");
-                    break;
-            }
-
-            // Send response back to client
-            unsigned int responseLen = sizeof(response);
-            unsigned int sent = 0;
-            char *sendPtr = (char *)&response;
-            while (sent < responseLen) {
-                int s = send(tcpClntSock, sendPtr + sent, responseLen - sent, 0);
-                if (s <= 0) {
-                    printf("(LodiServer) Error: Failed to send response\n");
-                    break;
+                // Route to appropriate handler based on message type
+                switch (incomingMsg.messageType) {
+                    case post:
+                        handlePost(&incomingMsg, &response);
+                        break;
+                    case follow:
+                        handleFollow(&incomingMsg, &response);
+                        break;
+                    case unfollow:
+                        handleUnfollow(&incomingMsg, &response);
+                        break;
+                    case logout:
+                        handleLogout(&incomingMsg, &response);
+                        break;
+                    default:
+                        printf("(LodiServer) Error: Unknown message type %d\n", incomingMsg.messageType);
+                        response.messageType = ackLogin; // Use ackLogin as error response
+                        response.userID = incomingMsg.userID;
+                        strcpy(response.message, "Error: Unknown message type");
+                        break;
                 }
-                sent += s;
-            }
 
-            if (sent == responseLen) {
-                printf("(LodiServer) Response sent to %s:%d\n",
-                       inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
-            }
+                // Send response back to client
+                unsigned int responseLen = sizeof(response);
+                unsigned int sent = 0;
+                char *sendPtr = (char *)&response;
+                while (sent < responseLen) {
+                    int s = send(tcpClntSock, sendPtr + sent, responseLen - sent, 0);
+                    if (s <= 0) {
+                        printf("(LodiServer) Error: Failed to send response\n");
+                        break;
+                    }
+                    sent += s;
+                }
 
-            close(tcpClntSock);
+                if (sent == responseLen) {
+                    printf("(LodiServer) Response sent to %s:%d\n",
+                           inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+                }
+
+                close(tcpClntSock);
+            }
         }
 
     }
