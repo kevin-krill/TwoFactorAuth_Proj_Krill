@@ -8,6 +8,7 @@ Begin by starting the servers:
 2. ./tfa_server <IP Address that the servers are running on>
 3. ./lodi_server <IP Address>
 
+***********Repeat Process for each new user**************
 Register with the lodi_client:
 4. ./lodi_client <ServerIP> <UserID> 
     you will then be prompted login / register
@@ -23,6 +24,8 @@ Now login with the logi_client:
 
 7. You should then be prompted on tfa_client to confirm the login (the request will timeout after 10 seconds) 
 Select yes/no on tfa_client to confirm or deny login request
+
+**********************************************************
 
 
 Once logged in you will now have access to all the features.

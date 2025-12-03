@@ -73,8 +73,7 @@ char *getUserAction() {
     return action;
 }
 
-// Helper function to send request to Lodi Server and receive response
-// Returns 0 on failure, 1 on success
+// Helper function to send request to Lodi Server and receive response, returns 0 on failure, 1 on success
 int sendRequestToServer(char *lodiServerIP, unsigned short lodiServerPort,
                         PClientToLodiServer *request, LodiServerMessage *response) {
     int tcpSock;
@@ -536,7 +535,7 @@ int main(int argc, char *argv[]) {
     pkeServerPort = 2924;
     lodiServerIP = argv[1];
     lodiServerPort = 2926;
-    char *action = getUserAction(); // Function to get user action: "register" or "login"
+    char *action = getUserAction(); // Function to get user "register" or "login"
 
     printf("(LodiCLient) Lodi Client\n");
     printf("(LodiCLient) User ID: %u\n", userID);
@@ -628,7 +627,7 @@ int main(int argc, char *argv[]) {
         printf("(LodiCLient) Timestamp: %lu\n", loginMsg.timestamp);
         printf("(LodiCLient) Digital Signature: %lu\n", loginMsg.digitalSig);
         
-        /* Create a separate TCP socket for the login */
+        // Create a separate TCP socket for the login 
         int tcpSock;
         if ((tcpSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
             DieWithError("(LodiCLient) TCP socket() failed");
@@ -638,7 +637,7 @@ int main(int argc, char *argv[]) {
             DieWithError("(LodiCLient) connect() failed");
         }
 
-        /* Send the login struct over TCP (ensure all bytes are sent) */
+        // Send the login struct over TCP (ensure all bytes are sent) 
         unsigned int loginMsgLen = sizeof(loginMsg);
         unsigned int sent = 0;
         while (sent < loginMsgLen) {
@@ -653,12 +652,11 @@ int main(int argc, char *argv[]) {
         printf("(LodiCLient) Login message sent to Lodi Server\n");
         printf("(LodiCLient) Waiting for response from Lodi Server...\n");
 
-        /* Set a receive timeout on TCP socket */
+        // Set a receive timeout on TCP socket 
         struct timeval tv = {10, 0};
         setsockopt(tcpSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-        /* Receive exactly the ACK struct size into buffer (handle partial reads)
-           Note: buffer is large enough. */
+        // Receive exactly the ACK struct size into buffer (handle partial reads)  
         unsigned int expected = sizeof(LodiServerMessage);
         unsigned int totalBytesRcvd = 0;
         while (totalBytesRcvd < expected) {
@@ -667,7 +665,7 @@ int main(int argc, char *argv[]) {
                 close(tcpSock);
                 DieWithError("(LodiCLient) recv() failed");
             }
-            if (r == 0) break; /* connection closed */
+            if (r == 0) break; 
             totalBytesRcvd += r;
         }
 

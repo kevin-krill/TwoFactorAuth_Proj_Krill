@@ -85,8 +85,7 @@ int postCount = 0;
 UserFollowingList userFollowingLists[MAX_USERS];
 int userListCount = 0;
 
-// Helper function to get or create a user's following list
-// Returns pointer to the user's list, or NULL if storage is full
+// Helper function to get or create a user's following list, returns pointer to the user's list, or NULL if storage is full
 UserFollowingList* getUserFollowingList(unsigned int userID) {
     // Check if user already has a list
     for (int i = 0; i < userListCount; i++) {
@@ -236,7 +235,7 @@ int requestTFAAuthentication(int sock, char *tfaServerIP, unsigned short tfaServ
     return 0;
 }
 
-// Skeleton: Handle post message
+//  Handle post message
 void handlePost(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE POST ---\n");
     printf("(LodiServer) User %u wants to post: \"%s\"\n", msg->userID, msg->message);
@@ -468,7 +467,7 @@ int handleFeedMultiple(PClientToLodiServer *msg, int clientSocket, struct sockad
     return 1;
 }
 
-// Skeleton: Handle logout request
+// Handle logout request
 void handleLogout(PClientToLodiServer *msg, LodiServerMessage *response) {
     printf("\n(LodiServer) --- HANDLE LOGOUT ---\n");
     printf("(LodiServer) User %u logging out\n", msg->userID);
@@ -504,11 +503,11 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    lodiServerPort = 2926; // 
+    lodiServerPort = 2926; 
     pkeServerIP = argv[1];
-    pkeServerPort = 2924;//
+    pkeServerPort = 2924;
     tfaServerIP = argv[1];
-    tfaServerPort = 2925;//
+    tfaServerPort = 2925;
     
     printf("(LodiServer) Lodi Server: \n");
     printf("(LodiServer) Listening on port: %u\n", lodiServerPort);
@@ -525,7 +524,7 @@ int main(int argc, char *argv[]) {
 
     printf("(LodiServer) Sockets created successfully\n");
 
-    // Configure UDP server address (for PKE/TFA communications)
+    // Configure UDP server address (for PKE/TFA)
     memset(&lodiServerAddr, 0, sizeof(lodiServerAddr));
     lodiServerAddr.sin_family = AF_INET;
     lodiServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -537,7 +536,7 @@ int main(int argc, char *argv[]) {
 
     printf("(LodiServer) UDP Socket bound to port %u\n", lodiServerPort);
 
-    // Configure TCP server address (same port)
+    // Configure TCP server address
     memset(&tcpServerAddr, 0, sizeof(tcpServerAddr));
     tcpServerAddr.sin_family = AF_INET;
     tcpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
