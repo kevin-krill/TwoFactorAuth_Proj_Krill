@@ -10,15 +10,15 @@ Begin by starting the servers:
 
 ***********Repeat Process for each new user**************
 Register with the lodi_client:
-4. ./lodi_client <ServerIP> <UserID> 
+4. ./lodi_client <ServerIP> <UserID#> 
     you will then be prompted login / register
     input register
 
 Then run the TFA client with the same ID:
-5. ./tfa_client <ServerIP> <UserID> 
+5. ./tfa_client <ServerIP> <UserID#> 
 
 Now login with the logi_client:
-6. ./lodi_client <ServerIP> <UserID>
+6. ./lodi_client <ServerIP> <UserID#>
     you will be prompted login / register
     input login
 
